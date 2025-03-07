@@ -51,6 +51,168 @@ class Querys:
             usuario = data["usuario"]
             enviada_proveedor = data["enviada_proveedor"]
             confirmada_proveedor = data["confirmada_proveedor"]
+            cant_registros = 0
+            limit = data["limit"]
+            position = data["position"]
+
+            if solicitud_aprobacion:
+                if solicitud_aprobacion == "1":
+                    solicitud_aprobacion = "S"
+                elif solicitud_aprobacion == "0":
+                    solicitud_aprobacion = "N"
+
+            response = list()
+            
+            sql = """
+                WITH AutorizacionUltima AS (
+                    SELECT
+                        numero,
+                        sw,
+                        autorizacion,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY numero, sw
+                            ORDER BY fecha DESC -- Tomar el registro más reciente
+                        ) AS rn
+                    FROM Distru_Autorizacion_Compra
+                )
+                SELECT
+                    dph."fecha" AS "fecha_orden_compra",
+                    dph."nit",
+                    t."nombres" AS proveedor,
+                    dph."numero",
+                    CASE
+                        WHEN (SELECT anulado FROM documentos_ped WHERE numero = dph."numero" AND sw = dph."sw") = 1 THEN 'ANULADA'
+                        ELSE 'VIGENTE'
+                    END AS estado,
+                    dph.usuario AS creador_oc,
+                    CASE
+                        WHEN au.autorizacion = 'S' THEN 'SI'
+                        WHEN au.autorizacion = 'N' THEN 'NO'
+                        ELSE ''
+                    END AS autorizada,
+                    dph."bodega" AS bodega,
+                    reo.aprobada AS "aprobada",
+                    reo.enviada_a_aprobar AS "enviada_a_aprobar",
+                    reo.enviada_al_proveedor AS "enviada_a_proveedor",
+                    reo.confirmada_por_proveedor AS "confirmada_por_proveedor?",
+                    reo.fecha_envio_al_proveedor AS "fecha_envio_proveedor",
+                    reo.observaciones AS "observaciones",
+                    COUNT(*) OVER() AS total_registros
+                FROM
+                    documentos_ped_historia dph
+                INNER JOIN
+                    terceros t ON dph."nit" = t."nit"
+                LEFT JOIN  
+                    AutorizacionUltima au ON dph."numero" = au.numero AND dph."sw" = au.sw AND au.rn = 1
+                LEFT JOIN
+                    registro_estados_oc reo ON dph."numero" = reo.numero_oc  
+                WHERE
+                    dph.sw = 3
+            """
+
+            if oc:
+                sql = self.add_oc_query(sql, oc)
+            if fecha_oc_desde and fecha_oc_hasta:
+                sql = self.add_fecha_oc_query(
+                    sql, 
+                    fecha_oc_desde, 
+                    fecha_oc_hasta
+                )
+            if solicitud_aprobacion:
+                sql = self.add_solicitud_aprobacion_query(
+                    sql, 
+                    solicitud_aprobacion
+                )
+            if usuario:
+                sql = self.add_usuario_query(sql, usuario)
+            if enviada_proveedor:
+                sql = self.add_enviada_proveedor_query(
+                    sql, 
+                    enviada_proveedor
+                )
+            if confirmada_proveedor:
+                sql = self.add_confirmada_proveedor_query(
+                    sql, 
+                    confirmada_proveedor
+                )
+            
+            new_offset = self.obtener_limit(limit, position)
+            self.query_params.update({"offset": new_offset, "limit": limit})
+            sql = sql + " ORDER BY dph.fecha DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY;"
+
+            if self.query_params:
+                query = session.execute(text(sql), self.query_params).fetchall()
+            else:
+                query = session.execute(text(sql)).fetchall()
+
+            if query:
+                cant_registros = query[0][14]
+                print(cant_registros)
+                for index, key in enumerate(query):
+                    aprobada = ''
+                    enviada_a_aprobar = ''
+                    enviada_a_proveedor = ''
+                    confirmada_por_proveedor = ''
+                    if key[8] == 1:
+                        aprobada = 'SI'
+                    elif key[8] == 0:
+                        aprobada = 'NO'
+                    if key[9] == 1:
+                        enviada_a_aprobar = 'SI'
+                    elif key[9] == 0:
+                        enviada_a_aprobar = 'NO'
+                    if key[10] == 1:
+                        enviada_a_proveedor = 'SI'
+                    elif key[10] == 0:
+                        enviada_a_proveedor = 'NO'
+                    if key[11] == 1:
+                        confirmada_por_proveedor = 'SI'
+                    elif key[11] == 0:
+                        confirmada_por_proveedor = 'NO'
+                    response.append({
+                        "consecutivo": index + 1,
+                        "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")  if key[0] else '',
+                        "nit": key[1],
+                        "proveedor": key[2],
+                        "numero": key[3],
+                        "estado": key[4],
+                        "creador_oc": key[5],
+                        "autorizada": key[6],
+                        "bodega": key[7],
+                        "aprobada": key[8],
+                        "aprobada?": aprobada,
+                        "enviada_a_aprobar": key[9],
+                        "enviada_a_aprobar?": enviada_a_aprobar,
+                        "enviada_a_proveedor": key[10],
+                        "enviada_a_proveedor?": enviada_a_proveedor,
+                        "confirmada_por_proveedor": key[11],
+                        "confirmada_por_proveedor?": confirmada_por_proveedor,
+                        "fecha_envio_proveedor": key[12],
+                        "observaciones": key[13]
+                    })
+
+            print(response)
+            print(cant_registros)
+            result = {"registros": response, "cant_registros": cant_registros}
+            return result
+                
+        except Exception as ex:
+            print(str(ex))
+            raise CustomException(str(ex))
+        finally:
+            session.close()
+
+    # Query para consultar la orden de compra segun un filtro
+    def consultar_orden_compra_excel(self, data: dict):
+
+        try:
+            oc = data["oc"]
+            fecha_oc_desde = data["fecha_oc_desde"]
+            fecha_oc_hasta = data["fecha_oc_hasta"]
+            solicitud_aprobacion = data["solicitud_aprobacion"]
+            usuario = data["usuario"]
+            enviada_proveedor = data["enviada_proveedor"]
+            confirmada_proveedor = data["confirmada_proveedor"]
 
             if solicitud_aprobacion:
                 if solicitud_aprobacion == "1":
@@ -131,6 +293,7 @@ class Querys:
                     sql, 
                     confirmada_proveedor
                 )
+            
             sql = sql + " ORDER BY dph.fecha DESC;"
 
             if self.query_params:
@@ -219,6 +382,10 @@ class Querys:
         sql = sql + " AND reo.confirmada_por_proveedor = :confirmado"
         self.query_params.update({"confirmado": confirmada_proveedor})
         return sql
+    
+    def obtener_limit(self, limit: int, position: int):
+        offset = (position - 1) * limit
+        return offset
 
     def guardar_registro_estado_oc(self, data: dict):
 
@@ -252,24 +419,20 @@ class Querys:
         
             registro_id = result[0]
             numero_oc = result[1]
-            print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
             if data["oc"] != numero_oc:
                 msg = "El número de orden de compra a actualizar no coincide."
                 raise CustomException(msg)
-            
-            print("bbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-            print(data)
-            
+
             data_update = {
                 "registro_id": registro_id,
                 "oc": numero_oc,
                 "enviada_a_aprobar": data["enviada_a_aprobar"],
                 "enviada_al_proveedor": data["enviada_al_proveedor"],
                 "confirmada_por_proveedor": data["confirmada_por_proveedor"],
-                "fecha_envio_al_proveedor": data["fecha_envio_al_proveedor"],
+                "fecha_envio_al_proveedor": data["fecha_envio_al_proveedor"] if data["fecha_envio_al_proveedor"] else None,
                 "observaciones": data["observaciones"],
             }
-            print(data_update)
             sql_update = """
                 UPDATE dbo.registro_estados_oc SET enviada_a_aprobar = :enviada_a_aprobar,
                 enviada_al_proveedor = :enviada_al_proveedor, 

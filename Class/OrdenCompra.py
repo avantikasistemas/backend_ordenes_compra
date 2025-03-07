@@ -21,10 +21,47 @@ class OrdenCompra:
             if oc:
                 data["oc"] = oc.strip()
 
+            if data["position"] <= 0:
+                message = "El campo posición no es válido"
+                raise CustomException(message)
+
             datos_oc = self.querys.consultar_orden_compra(data)
 
+            registros = datos_oc["registros"]
+            cant_registros = datos_oc["cant_registros"]
+
+            if not registros:
+                message = "No hay listado de reportes que mostrar."
+                return self.tools.output(200, message, data={
+                "total_registros": 0,
+                "total_pag": 0,
+                "posicion_pag": 0,
+                "registros": []
+            })
+
+            if cant_registros%data["limit"] == 0:
+                total_pag = cant_registros//data["limit"]
+            else:
+                total_pag = cant_registros//data["limit"] + 1
+
+            if total_pag < int(data["position"]):
+                message = "La posición excede el número total de registros."
+                return self.tools.output(200, message, data={
+                "total_registros": 0,
+                "total_pag": 0,
+                "posicion_pag": 0,
+                "registros": []
+            })
+
+            registros_dict = {
+                "total_registros": cant_registros,
+                "total_pag": total_pag,
+                "posicion_pag": data["position"],
+                "registros": registros
+            }
+
             # Retornamos la información.
-            return self.tools.output(200, "Datos encontrados.", datos_oc)
+            return self.tools.output(200, "Datos encontrados.", registros_dict)
 
         except Exception as e:
             print(f"Error al obtener información de orden de compra: {e}")
@@ -40,7 +77,7 @@ class OrdenCompra:
             if oc:
                 data["oc"] = oc.strip()
 
-            datos_oc = self.querys.consultar_orden_compra(data)
+            datos_oc = self.querys.consultar_orden_compra_excel(data)
 
             datos_excel = self.exportar_excel(datos_oc)
 
