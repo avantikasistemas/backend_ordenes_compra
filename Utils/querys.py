@@ -138,7 +138,7 @@ class Querys:
             
             new_offset = self.obtener_limit(limit, position)
             self.query_params.update({"offset": new_offset, "limit": limit})
-            sql = sql + " ORDER BY dph.fecha DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY;"
+            sql = sql + " ORDER BY dph.numero DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY;"
 
             if self.query_params:
                 query = session.execute(text(sql), self.query_params).fetchall()
@@ -147,7 +147,6 @@ class Querys:
 
             if query:
                 cant_registros = query[0][14]
-                print(cant_registros)
                 for index, key in enumerate(query):
                     aprobada = ''
                     enviada_a_aprobar = ''
@@ -190,9 +189,6 @@ class Querys:
                         "fecha_envio_proveedor": key[12],
                         "observaciones": key[13]
                     })
-
-            print(response)
-            print(cant_registros)
             result = {"registros": response, "cant_registros": cant_registros}
             return result
                 
@@ -397,14 +393,14 @@ class Querys:
             if not result:
                 sql = """
                     INSERT INTO dbo.registro_estados_oc (
-                        numero_oc, enviada_a_aprobar, enviada_al_proveedor, 
-                        confirmada_por_proveedor, fecha_envio_al_proveedor,
-                        observaciones
+                        numero_oc, aprobada, enviada_a_aprobar, 
+                        enviada_al_proveedor, confirmada_por_proveedor,
+                        fecha_envio_al_proveedor, observaciones
                     )
                     VALUES (
-                        :oc, :enviada_a_aprobar, :enviada_al_proveedor, 
-                        :confirmada_por_proveedor, :fecha_envio_al_proveedor, 
-                        :observaciones
+                        :oc, :aprobada, :enviada_a_aprobar, 
+                        :enviada_al_proveedor, :confirmada_por_proveedor, 
+                        :fecha_envio_al_proveedor, :observaciones
                     )
                 """
                 query = session.execute(text(sql), data)
@@ -427,6 +423,7 @@ class Querys:
             data_update = {
                 "registro_id": registro_id,
                 "oc": numero_oc,
+                "aprobada": data["aprobada"],
                 "enviada_a_aprobar": data["enviada_a_aprobar"],
                 "enviada_al_proveedor": data["enviada_al_proveedor"],
                 "confirmada_por_proveedor": data["confirmada_por_proveedor"],
@@ -434,7 +431,8 @@ class Querys:
                 "observaciones": data["observaciones"],
             }
             sql_update = """
-                UPDATE dbo.registro_estados_oc SET enviada_a_aprobar = :enviada_a_aprobar,
+                UPDATE dbo.registro_estados_oc SET aprobada = :aprobada, 
+                enviada_a_aprobar = :enviada_a_aprobar,
                 enviada_al_proveedor = :enviada_al_proveedor, 
                 confirmada_por_proveedor = :confirmada_por_proveedor, 
                 fecha_envio_al_proveedor = :fecha_envio_al_proveedor,

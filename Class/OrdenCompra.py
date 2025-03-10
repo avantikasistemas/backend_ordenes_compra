@@ -118,9 +118,26 @@ class OrdenCompra:
     def guardar_registro_estado_oc(self, data: dict):
         """ Api que realiza la consulta del tercero a la base de datos. """
 
-        try:
+        ordenes = data["ordenes"]
 
-            self.querys.guardar_registro_estado_oc(data)
+        try:
+            if ordenes:
+                for orden in ordenes:
+                    aprobada = None
+                    if orden["autorizada"] == "SI":
+                        aprobada = 1
+                    elif orden["autorizada"] == "NO":
+                        aprobada = 0
+                    data_insert = {
+                        "oc": orden["numero"],
+                        "aprobada": aprobada,
+                        "enviada_a_aprobar": orden["enviada_a_aprobar"],
+                        "enviada_al_proveedor": orden["enviada_a_proveedor"],
+                        "confirmada_por_proveedor": orden["confirmada_por_proveedor"],
+                        "fecha_envio_al_proveedor": orden["fecha_envio_proveedor"],
+                        "observaciones": orden["observaciones"],
+                    }
+                    self.querys.guardar_registro_estado_oc(data_insert)
             
             # Retornamos la información.
             return self.tools.output(200, "Registro guardado con exito.", data)
