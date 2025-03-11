@@ -1,11 +1,10 @@
-
-from Config.db import session
 from Utils.tools import Tools, CustomException
 from sqlalchemy import text
 
 class Querys:
 
-    def __init__(self):
+    def __init__(self, db):
+        self.db = db
         self.tools = Tools()
         self.query_params = dict()
 
@@ -24,7 +23,7 @@ class Querys:
                 ORDER BY u.des_usuario;
             """
 
-            query = session.execute(text(sql)).fetchall()
+            query = self.db.execute(text(sql)).fetchall()
             if query:
                 for key in query:
                     response.append({
@@ -38,7 +37,7 @@ class Querys:
             print(str(ex))
             raise CustomException(str(ex))
         finally:
-            session.close()
+            self.db.close()
 
     # Query para consultar la orden de compra segun un filtro
     def consultar_orden_compra(self, data: dict):
@@ -141,9 +140,9 @@ class Querys:
             sql = sql + " ORDER BY dph.numero DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY;"
 
             if self.query_params:
-                query = session.execute(text(sql), self.query_params).fetchall()
+                query = self.db.execute(text(sql), self.query_params).fetchall()
             else:
-                query = session.execute(text(sql)).fetchall()
+                query = self.db.execute(text(sql)).fetchall()
 
             if query:
                 cant_registros = query[0][14]
@@ -196,7 +195,7 @@ class Querys:
             print(str(ex))
             raise CustomException(str(ex))
         finally:
-            session.close()
+            self.db.close()
 
     # Query para consultar la orden de compra segun un filtro
     def consultar_orden_compra_excel(self, data: dict):
@@ -293,9 +292,9 @@ class Querys:
             sql = sql + " ORDER BY dph.fecha DESC;"
 
             if self.query_params:
-                query = session.execute(text(sql), self.query_params).fetchall()
+                query = self.db.execute(text(sql), self.query_params).fetchall()
             else:
-                query = session.execute(text(sql)).fetchall()
+                query = self.db.execute(text(sql)).fetchall()
 
             if query:
                 for index, key in enumerate(query):
@@ -347,7 +346,7 @@ class Querys:
             print(str(ex))
             raise CustomException(str(ex))
         finally:
-            session.close()
+            self.db.close()
 
     def add_oc_query(self, sql, oc):
         sql = sql + " AND dph.numero = :oc"
@@ -389,7 +388,7 @@ class Querys:
             sql_search = """
                 SELECT * FROM dbo.registro_estados_oc WHERE numero_oc = :oc;
             """ 
-            result = session.execute(text(sql_search), {"oc": data["oc"]}).fetchone()
+            result = self.db.execute(text(sql_search), {"oc": data["oc"]}).fetchone()
             if not result:
                 sql = """
                     INSERT INTO dbo.registro_estados_oc (
@@ -403,8 +402,8 @@ class Querys:
                         :fecha_envio_al_proveedor, :observaciones
                     )
                 """
-                query = session.execute(text(sql), data)
-                session.commit()
+                query = self.db.execute(text(sql), data)
+                self.db.commit()
                 if not query:
                     msg = """ 
                         Problemas al guardar registro, por favor contacte con 
@@ -439,8 +438,8 @@ class Querys:
                 observaciones = :observaciones
                 WHERE id = :registro_id AND numero_oc = :oc;
             """
-            query_update = session.execute(text(sql_update), data_update)
-            session.commit()
+            query_update = self.db.execute(text(sql_update), data_update)
+            self.db.commit()
             if not query_update:
                 msg = """ 
                     Problemas al guardar registro, por favor contacte con 
@@ -452,4 +451,4 @@ class Querys:
             print(str(ex))
             raise CustomException(str(ex))
         finally:
-            session.close()
+            self.db.close()

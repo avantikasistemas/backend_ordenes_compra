@@ -7,9 +7,10 @@ from io import BytesIO
 
 class OrdenCompra:
 
-    def __init__(self):
+    def __init__(self, db):
+        self.db = db
         self.tools = Tools()
-        self.querys = Querys()
+        self.querys = Querys(self.db)
 
     def get_orden_compra_data(self, data: dict):
         """ Api que realiza la consulta del tercero a la base de datos. """

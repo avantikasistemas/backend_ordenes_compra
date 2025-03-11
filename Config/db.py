@@ -1,6 +1,6 @@
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 import os
 from dotenv import load_dotenv
 
@@ -29,6 +29,16 @@ connect_url = sqlalchemy.engine.url.URL(
     }
 )
 
-engine = sqlalchemy.create_engine(connect_url, poolclass=NullPool)
-session_maker = sessionmaker(bind=engine)
-session = session_maker()
+# Usar QueuePool en lugar de NullPool para mejorar la concurrencia
+engine = sqlalchemy.create_engine(connect_url, pool_size=10, max_overflow=20)
+
+# Configurar sessionmaker
+session_maker = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Función para obtener una sesión por solicitud
+def get_db():
+    db = session_maker()
+    try:
+        yield db
+    finally:
+        db.close()
