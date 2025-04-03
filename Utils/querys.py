@@ -231,7 +231,7 @@ class Querys:
                     
                     response.append({
                         "consecutivo": index + 1,
-                        "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")  if key[0] else '',
+                        "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%d-%b-%Y")  if key[0] else '',
                         "nit": key[1],
                         "proveedor": key[2],
                         "numero": numero,
@@ -270,6 +270,8 @@ class Querys:
             usuario = data["usuario"]
             enviada_proveedor = data["enviada_proveedor"]
             confirmada_proveedor = data["confirmada_proveedor"]
+            estado_orden = data["estado_orden"]
+            enviada_a_aprobar = data["enviada_a_aprobar"]
 
             if solicitud_aprobacion:
                 if solicitud_aprobacion == "1":
@@ -350,6 +352,16 @@ class Querys:
                     sql, 
                     confirmada_proveedor
                 )
+            if estado_orden:
+                sql = self.add_estado_query(
+                    sql, 
+                    estado_orden
+                )
+            if enviada_a_aprobar:
+                sql = self.add_enviada_a_aprobar_query(
+                    sql, 
+                    enviada_a_aprobar
+                )
             
             sql = sql + " ORDER BY dph.fecha DESC;"
 
@@ -382,7 +394,7 @@ class Querys:
                         confirmada_por_proveedor = 'NO'
                     response.append({
                         "consecutivo": index + 1,
-                        "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")  if key[0] else '',
+                        "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%d-%b-%Y")  if key[0] else '',
                         "nit": key[1],
                         "proveedor": key[2],
                         "numero": key[3],
