@@ -50,6 +50,8 @@ class Querys:
             usuario = data["usuario"]
             enviada_proveedor = data["enviada_proveedor"]
             confirmada_proveedor = data["confirmada_proveedor"]
+            estado_orden = data["estado_orden"]
+            enviada_a_aprobar = data["enviada_a_aprobar"]
             cant_registros = 0
             limit = data["limit"]
             position = data["position"]
@@ -90,10 +92,10 @@ class Querys:
                         ELSE ''
                     END AS autorizada,
                     dph."bodega" AS bodega,
-                    reo.aprobada AS "aprobada",
-                    reo.enviada_a_aprobar AS "enviada_a_aprobar",
-                    reo.enviada_al_proveedor AS "enviada_a_proveedor",
-                    reo.confirmada_por_proveedor AS "confirmada_por_proveedor?",
+                    COALESCE(reo.aprobada, 0) AS "aprobada",
+                    COALESCE(reo.enviada_a_aprobar, 0) AS "enviada_a_aprobar",
+                    COALESCE(reo.enviada_al_proveedor, 0) AS "enviada_a_proveedor",
+                    COALESCE(reo.confirmada_por_proveedor, 0) AS "confirmada_por_proveedor?",
                     reo.fecha_envio_al_proveedor AS "fecha_envio_proveedor",
                     reo.observaciones AS "observaciones",
                     COUNT(*) OVER() AS total_registros
@@ -104,7 +106,7 @@ class Querys:
                 LEFT JOIN  
                     AutorizacionUltima au ON dph."numero" = au.numero AND dph."sw" = au.sw AND au.rn = 1
                 LEFT JOIN
-                    registro_estados_oc reo ON dph."numero" = reo.numero_oc  
+                    dbo.registro_estados_oc reo ON dph."numero" = reo.numero_oc  
                 WHERE
                     dph.sw = 3
             """
@@ -134,6 +136,16 @@ class Querys:
                     sql, 
                     confirmada_proveedor
                 )
+            if estado_orden:
+                sql = self.add_estado_query(
+                    sql, 
+                    estado_orden
+                )
+            if enviada_a_aprobar:
+                sql = self.add_enviada_a_aprobar_query(
+                    sql, 
+                    enviada_a_aprobar
+                )
             
             new_offset = self.obtener_limit(limit, position)
             self.query_params.update({"offset": new_offset, "limit": limit})
@@ -147,44 +159,94 @@ class Querys:
             if query:
                 cant_registros = query[0][14]
                 for index, key in enumerate(query):
-                    aprobada = ''
-                    enviada_a_aprobar = ''
-                    enviada_a_proveedor = ''
-                    confirmada_por_proveedor = ''
-                    if key[8] == 1:
-                        aprobada = 'SI'
-                    elif key[8] == 0:
-                        aprobada = 'NO'
-                    if key[9] == 1:
-                        enviada_a_aprobar = 'SI'
-                    elif key[9] == 0:
-                        enviada_a_aprobar = 'NO'
-                    if key[10] == 1:
-                        enviada_a_proveedor = 'SI'
-                    elif key[10] == 0:
-                        enviada_a_proveedor = 'NO'
-                    if key[11] == 1:
-                        confirmada_por_proveedor = 'SI'
-                    elif key[11] == 0:
-                        confirmada_por_proveedor = 'NO'
+                    reo_aprobada = key[8]
+                    reo_enviada_a_aprobar = key[9]
+                    reo_enviada_a_proveedor = key[10]
+                    reo_confirmada_por_proveedor = key[11]
+                    if reo_aprobada == 1:
+                        aprobada_texto = 'SI'
+                    elif reo_aprobada == 0:
+                        aprobada_texto = 'NO'
+                    if reo_enviada_a_aprobar == 1:
+                        enviada_a_aprobar_texto = 'SI'
+                    elif reo_enviada_a_aprobar == 0:
+                        enviada_a_aprobar_texto = 'NO'
+                    if reo_enviada_a_proveedor == 1:
+                        enviada_a_proveedor_texto = 'SI'
+                    elif reo_enviada_a_proveedor == 0:
+                        enviada_a_proveedor_texto = 'NO'
+                    if reo_confirmada_por_proveedor == 1:
+                        confirmada_por_proveedor_texto = 'SI'
+                    elif reo_confirmada_por_proveedor == 0:
+                        confirmada_por_proveedor_texto = 'NO'
+                        
+                    numero = key[3]
+                    autorizada = key[6]
+
+                    if autorizada == "SI" and reo_aprobada == 0:
+                        nuevo_registro = self.registrar_aprobacion_oc(numero)
+                        if nuevo_registro:
+                            # Aquí puedes reasignar lo que necesites
+                            aprobada_texto = 'NO'
+                            enviada_a_aprobar_texto = 'NO'
+                            enviada_a_proveedor_texto = 'NO'
+                            confirmada_por_proveedor_texto = 'NO'
+                            
+                            reo_aprobada = nuevo_registro.get("aprobada", 0)
+                            reo_enviada_a_aprobar = nuevo_registro.get("enviada_a_aprobar", 0)
+                            reo_enviada_a_proveedor = nuevo_registro.get("enviada_a_proveedor", 0)
+                            reo_confirmada_por_proveedor = nuevo_registro.get("confirmada_por_proveedor", 0)
+                            
+                            if reo_aprobada != 0:
+                                aprobada_texto = 'SI'
+                            if reo_enviada_a_aprobar != 0:
+                                enviada_a_aprobar_texto = 'SI'
+                            if reo_enviada_a_proveedor != 0:
+                                enviada_a_proveedor_texto = 'SI'
+                            if reo_confirmada_por_proveedor != 0:
+                                confirmada_por_proveedor_texto = 'SI'
+                            
+                    if autorizada == "SI" and reo_aprobada == 1 and reo_enviada_a_aprobar == 0:
+                        nuevo_registro = self.registrar_aprobacion_oc(numero)
+                        if nuevo_registro:
+                            # Aquí puedes reasignar lo que necesites
+                            aprobada_texto = 'NO'
+                            enviada_a_aprobar_texto = 'NO'
+                            enviada_a_proveedor_texto = 'NO'
+                            confirmada_por_proveedor_texto = 'NO'
+                            
+                            reo_aprobada = nuevo_registro.get("aprobada", 0)
+                            reo_enviada_a_aprobar = nuevo_registro.get("enviada_a_aprobar", 0)
+                            reo_enviada_a_proveedor = nuevo_registro.get("enviada_a_proveedor", 0)
+                            reo_confirmada_por_proveedor = nuevo_registro.get("confirmada_por_proveedor", 0)
+                            
+                            if reo_aprobada != 0:
+                                aprobada_texto = 'SI'
+                            if reo_enviada_a_aprobar != 0:
+                                enviada_a_aprobar_texto = 'SI'
+                            if reo_enviada_a_proveedor != 0:
+                                enviada_a_proveedor_texto = 'SI'
+                            if reo_confirmada_por_proveedor != 0:
+                                confirmada_por_proveedor_texto = 'SI'
+                    
                     response.append({
                         "consecutivo": index + 1,
                         "fecha_orden_compra": self.tools.format_date(str(key[0]), "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")  if key[0] else '',
                         "nit": key[1],
                         "proveedor": key[2],
-                        "numero": key[3],
+                        "numero": numero,
                         "estado": key[4],
                         "creador_oc": key[5],
-                        "autorizada": key[6],
+                        "autorizada": autorizada,
                         "bodega": key[7],
-                        "aprobada": key[8],
-                        "aprobada?": aprobada,
-                        "enviada_a_aprobar": key[9],
-                        "enviada_a_aprobar?": enviada_a_aprobar,
-                        "enviada_a_proveedor": key[10],
-                        "enviada_a_proveedor?": enviada_a_proveedor,
-                        "confirmada_por_proveedor": key[11],
-                        "confirmada_por_proveedor?": confirmada_por_proveedor,
+                        "aprobada": reo_aprobada,
+                        "aprobada?": aprobada_texto,
+                        "enviada_a_aprobar": reo_enviada_a_aprobar,
+                        "enviada_a_aprobar?": enviada_a_aprobar_texto,
+                        "enviada_a_proveedor": reo_enviada_a_proveedor,
+                        "enviada_a_proveedor?": enviada_a_proveedor_texto,
+                        "confirmada_por_proveedor": reo_confirmada_por_proveedor,
+                        "confirmada_por_proveedor?": confirmada_por_proveedor_texto,
                         "fecha_envio_proveedor": key[12],
                         "observaciones": key[13]
                     })
@@ -245,10 +307,10 @@ class Querys:
                         ELSE ''
                     END AS autorizada,
                     dph."bodega" AS bodega,
-                    reo.aprobada AS "aprobada",
-                    reo.enviada_a_aprobar AS "enviada_a_aprobar",
-                    reo.enviada_al_proveedor AS "enviada_a_proveedor",
-                    reo.confirmada_por_proveedor AS "confirmada_por_proveedor?",
+                    COALESCE(reo.aprobada, 0) AS "aprobada",
+                    COALESCE(reo.enviada_a_aprobar, 0) AS "enviada_a_aprobar",
+                    COALESCE(reo.enviada_al_proveedor, 0) AS "enviada_a_proveedor",
+                    COALESCE(reo.confirmada_por_proveedor, 0) AS "confirmada_por_proveedor?",
                     reo.fecha_envio_al_proveedor AS "fecha_envio_proveedor",
                     reo.observaciones AS "observaciones"
                 FROM
@@ -258,7 +320,7 @@ class Querys:
                 LEFT JOIN  
                     AutorizacionUltima au ON dph."numero" = au.numero AND dph."sw" = au.sw AND au.rn = 1
                 LEFT JOIN
-                    registro_estados_oc reo ON dph."numero" = reo.numero_oc  
+                    dbo.registro_estados_oc reo ON dph."numero" = reo.numero_oc  
                 WHERE
                     dph.sw = 3
             """
@@ -348,40 +410,60 @@ class Querys:
         finally:
             self.db.close()
 
+    # Query que complementa la inicial que busca la orden de compra
     def add_oc_query(self, sql, oc):
         sql = sql + " AND dph.numero = :oc"
         self.query_params.update({"oc": oc})
         return sql
 
+    # Query que complementa la inicial que filtra por fechas
     def add_fecha_oc_query(self, sql, fecha_desde, fecha_hasta):
         sql = sql + " AND dph.fecha BETWEEN :fecha_desde AND :fecha_hasta"
         self.query_params.update({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta})
         return sql
 
+    # Query que complementa la inicial que filtra por solicitud de aprobación
     def add_solicitud_aprobacion_query(self, sql, solicitud_aprobacion):
         sql = sql + " AND au.autorizacion = :solicitud_aprobacion"
         self.query_params.update({"solicitud_aprobacion": solicitud_aprobacion})
         return sql
 
+    # Query que complementa la inicial que filtra por nombre de usuario
     def add_usuario_query(self, sql, usuario):
         sql = sql + " AND dph.usuario = :usuario"
         self.query_params.update({"usuario": usuario})
         return sql
 
+    # Query que complementa la inicial que filtra si fue enviada al proveedor
     def add_enviada_proveedor_query(self, sql, enviada_proveedor):
         sql = sql + " AND reo.enviada_al_proveedor = :enviado"
         self.query_params.update({"enviado": enviada_proveedor})
         return sql
 
+    # Query que complementa la inicial que filtra si fue confirmada por proveedor
     def add_confirmada_proveedor_query(self, sql, confirmada_proveedor):
         sql = sql + " AND reo.confirmada_por_proveedor = :confirmado"
         self.query_params.update({"confirmado": confirmada_proveedor})
         return sql
-    
+
+    # Query que complementa la inicial que filtra por estado de la orden
+    def add_estado_query(self, sql, estado_orden):
+        sql = sql + " AND dph.anulado = :estado"
+        self.query_params.update({"estado": estado_orden})
+        return sql
+
+    # Query que complementa la inicial que filtra si fue aprobada
+    def add_enviada_a_aprobar_query(self, sql, enviada_a_aprobar):
+        sql = sql + " AND reo.enviada_a_aprobar = :enviada_a_aprobar"
+        self.query_params.update({"enviada_a_aprobar": enviada_a_aprobar})
+        return sql
+
+    # Función que arma el limite de paginación
     def obtener_limit(self, limit: int, position: int):
         offset = (position - 1) * limit
         return offset
 
+    # Query que guarda las ordenes de compra
     def guardar_registro_estado_oc(self, data: dict):
 
         try:
@@ -452,3 +534,48 @@ class Querys:
             raise CustomException(str(ex))
         finally:
             self.db.close()
+
+    # Función que inserta o actualiza aprobado y enviado a aprobar
+    # en caso que haya sido AUTORIZADA
+    def registrar_aprobacion_oc(self, numero: int):
+        try:
+            # Verificar si ya existe
+            consulta = self.db.execute(
+                text("SELECT COUNT(1) FROM dbo.registro_estados_oc WHERE numero_oc = :numero"),
+                {"numero": numero}
+            ).scalar()
+
+            if consulta and consulta > 0:
+                # Si existe, actualizar
+                self.db.execute(
+                    text("""
+                        UPDATE dbo.registro_estados_oc
+                        SET aprobada = :aprobada, enviada_a_aprobar = :enviada_a_aprobar
+                        WHERE numero_oc = :numero
+                    """),
+                    {"numero": numero, "aprobada": 1, "enviada_a_aprobar": 1}
+                )
+            else:
+                # Si no existe, insertar
+                self.db.execute(
+                    text("""
+                        INSERT INTO dbo.registro_estados_oc (numero_oc, aprobada, enviada_a_aprobar)
+                        VALUES (:numero, :aprobada, :enviada_a_aprobar)
+                    """),
+                    {"numero": numero, "aprobada": 1, "enviada_a_aprobar": 1}
+                )
+
+            self.db.commit()
+
+            # Retornar el registro actualizado o insertado
+            registro = self.db.execute(
+                text("SELECT * FROM dbo.registro_estados_oc WHERE numero_oc = :numero"),
+                {"numero": numero}
+            ).fetchone()
+
+            return dict(registro._mapping) if registro else None
+
+        except Exception as e:
+            print(f"Error al consultar registros: {e}")
+            self.db.rollback()
+            raise CustomException("Error al consultar registros.")

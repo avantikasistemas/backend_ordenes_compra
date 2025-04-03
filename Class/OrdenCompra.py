@@ -12,6 +12,7 @@ class OrdenCompra:
         self.tools = Tools()
         self.querys = Querys(self.db)
 
+    # Función para obtener las ordenes de compra, según filtros
     def get_orden_compra_data(self, data: dict):
         """ Api que realiza la consulta del tercero a la base de datos. """
 
@@ -68,6 +69,7 @@ class OrdenCompra:
             print(f"Error al obtener información de orden de compra: {e}")
             raise CustomException("Error al obtener información de orden de compra.")
 
+    # Función para generar reporte de las ordenes en excel
     def generar_excel(self, data: dict):
         """ Api que realiza la consulta del tercero a la base de datos. """
 
@@ -92,6 +94,7 @@ class OrdenCompra:
             print(f"Error al obtener información de orden de compra: {e}")
             raise CustomException("Error al obtener información de orden de compra.")
 
+    # Función que realiza la operacion de exporte con libreria de excel
     def exportar_excel(self, datos: list):
 
         # Convertir los datos a un DataFrame de pandas
@@ -116,6 +119,7 @@ class OrdenCompra:
         }
         return {"output": output, "headers": headers}
 
+    # Función que se encarga de guardar los registros
     def guardar_registro_estado_oc(self, data: dict):
         """ Api que realiza la consulta del tercero a la base de datos. """
 
