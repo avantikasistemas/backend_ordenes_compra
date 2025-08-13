@@ -591,3 +591,23 @@ class Querys:
             print(f"Error al consultar registros: {e}")
             self.db.rollback()
             raise CustomException("Error al consultar registros.")
+
+    # Query que busca la orden de compra nacional
+    def buscar_oc_nacional(self, oc, tasa, factor):
+
+        try:
+            sql = """
+                SELECT dph.*, m.descripcion as nombre_moneda
+                FROM documentos_ped_historia dph
+                LEFT JOIN monedas m ON dph.moneda = m.moneda
+                WHERE dph.sw = 3 AND numero = :oc AND anulado = 0
+            """
+            result = self.db.execute(text(sql), {"oc": oc}).fetchone()
+            registros_dict = [dict(row._mapping) for row in result]
+
+            # Retornamos la información.
+            return registros_dict
+
+        except Exception as e:
+            print(f"Error al obtener información de orden de compra: {e}")
+            raise CustomException("Error al obtener información de orden de compra.")
