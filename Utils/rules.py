@@ -10,6 +10,7 @@ class Rules:
     def __init__(self, path: str, params: dict):
         path_dict = {
             "/get_orden_compra_data": self.__val_get_orden_compra_data,
+            "/guardar_seguimiento": self.__val_guardar_seguimiento,
         }
         # Se obtiene la funcion a ejecutar
         func = path_dict.get(path, None)
@@ -63,6 +64,29 @@ class Rules:
                 "campo": "confirmada proveedor",
                 "valor": params["confirmada_proveedor"],
                 "obligatorio": False,
+            }
+        ]
+        return validacion_dict
+
+    def __val_guardar_seguimiento(self, params):
+        validacion_dict = [
+            {
+                "tipo": "int",
+                "campo": "orden de compra",
+                "valor": params["oc"],
+                "obligatorio": True,
+            },
+            {
+                "tipo": "string",
+                "campo": "usuario",
+                "valor": params["usuario"],
+                "obligatorio": True,
+            },
+            {
+                "tipo": "string",
+                "campo": "comentario",
+                "valor": params["comentario"],
+                "obligatorio": True,
             }
         ]
         return validacion_dict
