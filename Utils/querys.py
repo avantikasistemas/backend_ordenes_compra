@@ -591,3 +591,51 @@ class Querys:
             print(f"Error al consultar registros: {e}")
             self.db.rollback()
             raise CustomException("Error al consultar registros.")
+
+    # Query para guardar seguimiento
+    def guardar_seguimiento(self, data: dict):
+        try:
+            self.db.execute(
+                text("""
+                    INSERT INTO dbo.seguimiento_ordenes_compra (numero, usuario, comentario)
+                    VALUES (:numero, :usuario, :comentario)
+                """),
+                {
+                    "numero": data["oc"],
+                    "usuario": data["usuario"],
+                    "comentario": data["comentario"]
+                }
+            )
+            self.db.commit()
+            return True
+        except CustomException as e:
+            print(f"Error al guardar seguimiento: {e}")
+            self.db.rollback()
+            raise CustomException("Error al guardar seguimiento.")
+        finally:
+            self.db.close()
+
+    # Query para cargar datos de seguimiento
+    def cargar_datos_seguimiento(self, oc):
+        try:
+            seguimientos = self.db.execute(
+                text("""
+                    SELECT * FROM dbo.seguimiento_ordenes_compra
+                    WHERE numero = :numero AND estado = 1;
+                """),
+                {"numero": oc}
+            ).fetchall()
+
+            result = []
+            for row in seguimientos:
+                row_dict = dict(row._mapping)
+                if "created_at" in row_dict and row_dict["created_at"]:
+                    # Formatear el campo created_at
+                    row_dict["created_at"] = row_dict["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                result.append(row_dict)
+            return result if seguimientos else []
+        except Exception as e:
+            print(f"Error al cargar datos de seguimiento: {e}")
+            raise CustomException("Error al cargar datos de seguimiento.")
+        finally:
+            self.db.close()
