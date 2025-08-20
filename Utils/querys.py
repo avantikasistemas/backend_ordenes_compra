@@ -1,5 +1,6 @@
 from Utils.tools import Tools, CustomException
 from sqlalchemy import text
+from datetime import datetime
 
 class Querys:
 
@@ -657,5 +658,173 @@ class Querys:
         except Exception as e:
             print(f"Error al cargar datos de seguimiento: {e}")
             raise CustomException("Error al cargar datos de seguimiento.")
+        finally:
+            self.db.close()
+
+    # Query para verificar si la OC está anulada
+    def check_si_oc_anulada(self, oc: int):
+        try:
+            sql = """
+                SELECT t.nombres as tercero_nombre, dp.* FROM dbo.documentos_ped dp
+                INNER JOIN terceros t ON dp.nit = t.nit
+                WHERE dp.numero = :oc AND dp.sw = 3
+            """
+            result = self.db.execute(text(sql), {"oc": oc}).fetchone()
+            result2_list = []
+            if result:
+                sql2 = """
+                    SELECT r.descripcion as item_nombre, dlp.* FROM dbo.documentos_lin_ped dlp
+                    INNER JOIN referencias r ON dlp.codigo = r.codigo
+                    WHERE dlp.numero = :oc AND dlp.sw = 3
+                """
+                result2 = self.db.execute(text(sql2), {"oc": oc}).fetchall()
+                if result2:
+                    result2_list = [dict(row._mapping) for row in result2]
+            if result:
+                res_json = dict(result._mapping)
+                res_json["oc_detalles"] = result2_list
+                return res_json
+            else:
+                return None
+        except Exception as e:
+            print(f"Error al verificar si la OC está anulada: {e}")
+            raise CustomException("Error al verificar si la OC está anulada.")
+
+    # Query para guardar registro de anulación
+    def guardar_registro_anulacion(self, data: dict):
+        try:
+            result = self.db.execute(
+                text("""
+                    INSERT INTO dbo.anulacion_ordenes_compra (numero, usuario, comentario, created_at)
+                    OUTPUT INSERTED.*
+                    VALUES (:numero, :usuario, :comentario, :created_at)
+                """),
+                {
+                    "numero": data["oc"],
+                    "usuario": data["usuario"],
+                    "comentario": data["comentario"],
+                    "created_at": datetime.now()
+                }
+            )
+            row = result.fetchone()
+            self.db.commit()
+            if row:
+                return dict(row._mapping)
+            return None
+
+        except CustomException as e:
+            print(f"Error al guardar registro de anulación: {e}")
+            self.db.rollback()
+            raise CustomException("Error al guardar registro de anulación.")
+        finally:
+            self.db.close()
+
+    # Query para consultar registro de anulación
+    def consultar_registro_anulacion(self, oc: int):
+        try:
+            sql = """
+                SELECT * FROM dbo.anulacion_ordenes_compra
+                WHERE numero = :oc AND estado = 1
+            """
+            result = self.db.execute(text(sql), {"oc": oc}).fetchone()
+            return dict(result._mapping) if result else None
+        except Exception as e:
+            print(f"Error al consultar registro de anulación: {e}")
+            raise CustomException("Error al consultar registro de anulación.")
+        finally:
+            self.db.close()
+
+    # Query para consultar registro de anulación
+    def consultar_registro_anulacion_x_id(self, id: int):
+        try:
+            sql = """
+                SELECT * FROM dbo.anulacion_ordenes_compra
+                WHERE id = :id AND estado = 1
+            """
+            result = self.db.execute(text(sql), {"id": id}).fetchone()
+            return dict(result._mapping) if result else None
+        except Exception as e:
+            print(f"Error al consultar registro de anulación: {e}")
+            raise CustomException("Error al consultar registro de anulación.")
+        finally:
+            self.db.close()
+
+    # Query para anular cabecera de OC
+    def anular_cabecera_oc(self, oc: int):
+        try:
+            sql = """
+                UPDATE dbo.documentos_ped SET anulado = 1
+                WHERE numero = :oc AND sw = 3
+            """
+            self.db.execute(text(sql), {"oc": oc})
+            self.db.commit()
+            return True
+        except Exception as e:
+            print(f"Error al anular cabecera de OC: {e}")
+            self.db.rollback()
+            raise CustomException("Error al anular cabecera de OC.")
+        finally:
+            self.db.close()
+
+    # Query para eliminar ítems de OC
+    def eliminar_items_oc(self, oc: int):
+        try:
+            sql = """
+                DELETE FROM dbo.documentos_lin_ped
+                WHERE numero = :oc AND sw = 3
+            """
+            self.db.execute(text(sql), {"oc": oc})
+            self.db.commit()
+            return True
+        except Exception as e:
+            print(f"Error al eliminar ítems de OC: {e}")
+            self.db.rollback()
+            raise CustomException("Error al eliminar ítems de OC.")
+        finally:
+            self.db.close()
+
+    # Query para actualizar registro de anulación
+    def actualizar_registro_anulacion(
+        self, 
+        id: int, 
+        numero_oc: int, 
+        anulado: int, 
+        equipo: str
+    ):
+        try:
+            sql = """
+                UPDATE dbo.anulacion_ordenes_compra
+                SET anulado = :anulado, equipo = :equipo
+                WHERE id = :id AND numero = :numero_oc AND estado = 1
+            """
+            self.db.execute(text(sql), {
+                "numero_oc": numero_oc, 
+                "id": id, 
+                "anulado": anulado, 
+                "equipo": equipo
+            })
+            self.db.commit()
+            return True
+        except Exception as e:
+            print(f"Error al actualizar registro de anulación: {e}")
+            self.db.rollback()
+            raise CustomException("Error al actualizar registro de anulación.")
+        finally:
+            self.db.close()
+
+    # Query para obtener email por usuario
+    def get_mail_by_username(self, usuario: str):
+        try:
+            sql = """
+                SELECT t.mail 
+                FROM usuarios u
+                INNER JOIN terceros t ON t.nit = u.nit
+                WHERE u.usuario = :usuario
+            """
+            result = self.db.execute(text(sql), {"usuario": usuario}).fetchone()
+            return dict(result._mapping)["mail"] if result else None
+        except Exception as e:
+            print(f"Error al obtener email por usuario: {e}")
+            raise CustomException("Error al obtener email por usuario.")
         finally:
             self.db.close()

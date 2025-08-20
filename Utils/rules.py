@@ -11,6 +11,7 @@ class Rules:
         path_dict = {
             "/get_orden_compra_data": self.__val_get_orden_compra_data,
             "/guardar_seguimiento": self.__val_guardar_seguimiento,
+            "/peticion_anular_orden_compra": self.__val_peticion_anular_orden_compra,
         }
         # Se obtiene la funcion a ejecutar
         func = path_dict.get(path, None)
@@ -86,6 +87,23 @@ class Rules:
                 "tipo": "string",
                 "campo": "comentario",
                 "valor": params["comentario"],
+                "obligatorio": True,
+            }
+        ]
+        return validacion_dict
+
+    def __val_peticion_anular_orden_compra(self, params):
+        validacion_dict = [
+            {
+                "tipo": "int",
+                "campo": "orden de compra",
+                "valor": params["oc"],
+                "obligatorio": True,
+            },
+            {
+                "tipo": "string",
+                "campo": "usuario",
+                "valor": params["usuario"],
                 "obligatorio": True,
             }
         ]

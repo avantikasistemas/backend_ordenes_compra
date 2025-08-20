@@ -7,6 +7,7 @@ from Router.OrdenCompra import orden_compra_router
 from Router.Parametros import parametros_router
 from Router.OrdenCompraNacional import orden_compra_router_nacional
 from Router.Seguimiento import seguimiento_router
+from Router.Anulacion import anular_router
 
 app = FastAPI()
 app.title = "Avantika Ordenes de Compra"
@@ -23,6 +24,7 @@ app.include_router(orden_compra_router)
 app.include_router(parametros_router)
 app.include_router(orden_compra_router_nacional)
 app.include_router(seguimiento_router)
+app.include_router(anular_router)
 
 BASE.metadata.create_all(bind=engine)
 

@@ -2,17 +2,26 @@
 # from Utils.constants import BASE_PATH_TEMPLATE
 from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 # from email.mime.multipart import MIMEMultipart
 # from email.mime.text import MIMEText
 # from email.mime.base import MIMEBase
 # from email import encoders
 # import json
-# import os
-# import smtplib
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 import pytz
 from datetime import datetime, timezone
 from decimal import Decimal
+
+# Cargar variables de entorno
+load_dotenv()
+
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 25))
 
 class Tools:
 
@@ -88,6 +97,36 @@ class Tools:
         value = value.replace(",", "")
         valor_decimal = Decimal(value)
         return valor_decimal
+
+    # Función para enviar correos electrónicos
+    def send_email_individual(self, to_email, cc_emails, subject, body, logo_path=None, mail_sender=None):
+        """Envía un correo electrónico a un destinatario con copia a otros y adjunta un logo si está disponible."""
+        msg = MIMEMultipart()
+        msg['From'] = mail_sender
+        msg['To'] = to_email
+        msg['Cc'] = ", ".join(cc_emails) if cc_emails else ""
+        msg['Subject'] = subject
+
+        # Agregar el contenido HTML
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Adjuntar el logo si está disponible
+        if logo_path:
+            try:
+                with open(logo_path, 'rb') as img:
+                    logo = MIMEImage(img.read())
+                    logo.add_header('Content-ID', '<company_logo>')
+                    msg.attach(logo)
+            except Exception as e:
+                print(f"Error adjuntando el logo: {e}")
+        
+        try:
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.sendmail(mail_sender, [to_email] + cc_emails, msg.as_string())
+            print(f"Correo enviado a {to_email} con copia a {', '.join(cc_emails)}")
+        except Exception as ex:
+            print(f"Error al enviar correo a {to_email}: {ex}")
+
 
     # """ Obtener archivo"""
     # def get_file_b64(self, file_path):
