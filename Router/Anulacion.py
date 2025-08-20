@@ -4,6 +4,7 @@ from Schemas.OrdenCompra.get_orden_compra import GetOrdenCompra
 from Class.Anulacion import Anulacion
 from Utils.decorator import http_decorator
 from Config.db import get_db
+import socket
 
 anular_router = APIRouter()
 
@@ -18,6 +19,10 @@ def peticion_anular_orden_compra(request: Request, db: Session = Depends(get_db)
 @http_decorator
 def validar_anulacion_orden_compra(request: Request, db: Session = Depends(get_db)):
     ip = request.client.host
+    try:
+        hostname = socket.gethostbyaddr(ip)[0]
+    except Exception:
+        hostname = None
     data = getattr(request.state, "json_data", {})
-    response = Anulacion(db).validar_anulacion_orden_compra(data, ip)
+    response = Anulacion(db).validar_anulacion_orden_compra(data, ip, hostname)
     return response

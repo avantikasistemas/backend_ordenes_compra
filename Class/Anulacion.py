@@ -259,7 +259,7 @@ class Anulacion:
         """
 
     # Función para obtener los datos de la orden de compra
-    def validar_anulacion_orden_compra(self, data: dict, ip: str):
+    def validar_anulacion_orden_compra(self, data: dict, ip: str, hostname: str):
 
         try:
             id = data["id"]
@@ -286,20 +286,20 @@ class Anulacion:
                 msg_respuesta = f"La anulación ha sido rechazada."
                 body_email = self.build_notificacion_email_html(msg_respuesta)
                 self.querys.actualizar_registro_anulacion(
-                    id, numero_oc, 0, ip)
+                    id, numero_oc, accion, ip, hostname)
                 
             if accion == 1:
                 msg_respuesta = f"La anulación ha sido aprobada."
                 self.querys.anular_cabecera_oc(numero_oc)
                 self.querys.eliminar_items_oc(numero_oc)
                 self.querys.actualizar_registro_anulacion(
-                    id, numero_oc, 1, ip)
+                    id, numero_oc, accion, ip, hostname)
                 
-                msg = f"La orden de compra No. {numero_oc} fue aprobada para su anulación."
+                msg = f"La orden de compra No. {numero_oc} fue anulada."
                 body_email = self.build_notificacion_email_html(msg)
                 
             to_email = mail
-            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co'] # Estos son los correos a enviar en producción.
+            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co'] # Estos son los correos a enviar en producción.
             cc_emails = ['auxiliartic@avantika.com.co', 'sistemas@avantika.com.co']
             if mail not in cc_emails:
                 cc_emails.append(mail)
@@ -309,6 +309,7 @@ class Anulacion:
                 cc_emails=cc_emails,
                 subject=f"Anulación orden de compra #: {numero_oc}",
                 body=body_email,
+                logo_path=None,
                 mail_sender='tic@avantika.com.co' # Cambia por gerencia
             )
 

@@ -789,19 +789,21 @@ class Querys:
         id: int, 
         numero_oc: int, 
         anulado: int, 
-        equipo: str
+        equipo: str,
+        equipo_nombre: str
     ):
         try:
             sql = """
                 UPDATE dbo.anulacion_ordenes_compra
-                SET anulado = :anulado, equipo = :equipo
+                SET anulado = :anulado, equipo = :equipo, equipo_nombre = :equipo_nombre
                 WHERE id = :id AND numero = :numero_oc AND estado = 1
             """
             self.db.execute(text(sql), {
                 "numero_oc": numero_oc, 
                 "id": id, 
                 "anulado": anulado, 
-                "equipo": equipo
+                "equipo": equipo,
+                "equipo_nombre": equipo_nombre
             })
             self.db.commit()
             return True
