@@ -75,12 +75,15 @@ class Anulacion:
             if mail not in cc_emails:
                 cc_emails.append(mail)
 
+            # Ruta absoluta al logo en la raíz del backend
+            logo_path = os.path.join(os.getcwd(), "logo.png")
+
             self.tools.send_email_individual(
                 to_email=to_email,
                 cc_emails=cc_emails,
                 subject=f"Anulación orden de compra #: {data['oc']}",
                 body=body_email,
-                logo_path="C:/inetpub/wwwroot/App_Avantika/Mercadeo/clientes_creados_mes/logo.png",
+                logo_path=logo_path,
                 mail_sender=mail
             )
 
@@ -106,6 +109,7 @@ class Anulacion:
                     <table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;'>
                         <thead>
                             <tr style='background:#f9fafb;'>
+                                <th style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;font-weight:600;padding:8px 10px;'>#</th>
                                 <th style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;font-weight:600;padding:8px 10px;'>Código</th>
                                 <th style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;font-weight:600;padding:8px 10px;'>Descripción</th>
                                 <th style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;font-weight:600;padding:8px 10px;'>Cantidad</th>
@@ -114,9 +118,10 @@ class Anulacion:
                         </thead>
                         <tbody>
             """
-            for item in oc_detalles:
+            for idx, item in enumerate(oc_detalles):
                 items_html += f"""
                             <tr>
+                                <td style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111827;padding:8px 10px;'>{idx+1}</td>
                                 <td style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111827;padding:8px 10px;'>{item.get('codigo', '')}</td>
                                 <td style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111827;padding:8px 10px;'>{item.get('item_nombre', '')}</td>
                                 <td style='font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111827;padding:8px 10px;'>{item.get('cantidad', '')}</td>
@@ -155,9 +160,6 @@ class Anulacion:
         return f"""\
             <!DOCTYPE html>
             <html lang="es">
-                <div style='text-align: left;'>
-                    <img src='{logo_url}' alt='Logo Avantika' style='width:150px; max-width:150px;'/>
-                </div>
                 <head>
                     <meta charset="utf-8">
                     <meta name="x-apple-disable-message-reformatting">
@@ -175,12 +177,15 @@ class Anulacion:
                                 <td style="padding:24px 24px 0 24px;">
                                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
                                     <tr>
-                                    <td valign="middle" style="padding-left:12px;">
-                                        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:700;line-height:1.2;">Avantika</div>
-                                        <div style="font-family:Arial,Helvetica,sans-serif;font-size:20px;color:#111827;font-weight:700;line-height:1.3;">
-                                        Solicitud de Anulación<br>de Orden de Compra
-                                        </div>
-                                    </td>
+                                        <td valign="middle" style="padding-left:12px;">
+                                            <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:700;line-height:1.2;">Avantika</div>
+                                            <div style="font-family:Arial,Helvetica,sans-serif;font-size:20px;color:#111827;font-weight:700;line-height:1.3;">
+                                                Solicitud de Anulación<br>de Orden de Compra
+                                            </div>
+                                        </td>
+                                        <td valign="middle" align="right" style="width:150px;">
+                                            <img src='{logo_url}' alt='Logo Avantika' style='width:150px; max-width:150px;'/>
+                                        </td>
                                     </tr>
                                 </table>
                                 </td>
