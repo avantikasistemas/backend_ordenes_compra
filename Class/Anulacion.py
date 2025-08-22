@@ -69,9 +69,8 @@ class Anulacion:
             # Construimos el cuerpo del correo electrónico
             body_email = self.build_anulacion_email_html(data_oc, link, data)
             
-            to_email = 'sistemas@avantika.com.co' # Cambiar por gerencia
-            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co'] # Estos son los correos a enviar en producción.
-            cc_emails = ['auxiliartic@avantika.com.co']
+            to_email = 'gerencia@avantika.com.co'
+            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
             if mail not in cc_emails:
                 cc_emails.append(mail)
 
@@ -304,8 +303,7 @@ class Anulacion:
                 body_email = self.build_notificacion_email_html(msg)
                 
             to_email = mail
-            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co'] # Estos son los correos a enviar en producción.
-            cc_emails = ['auxiliartic@avantika.com.co', 'sistemas@avantika.com.co']
+            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
             if mail not in cc_emails:
                 cc_emails.append(mail)
 
@@ -315,7 +313,7 @@ class Anulacion:
                 subject=f"Anulación orden de compra #: {numero_oc}",
                 body=body_email,
                 logo_path=None,
-                mail_sender='tic@avantika.com.co' # Cambia por gerencia
+                mail_sender='gerencia@avantika.com.co'
             )
 
             return self.tools.output(200, msg_respuesta)
