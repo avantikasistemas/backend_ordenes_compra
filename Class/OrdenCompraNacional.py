@@ -24,8 +24,6 @@ class OrdenCompraNacional:
         print(data)
 
         try:
-            if oc:
-                oc = oc.strip()
 
             datos_oc = self.querys.buscar_oc_nacional(oc, tasa, factor)
 

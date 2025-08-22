@@ -598,13 +598,13 @@ class Querys:
 
         try:
             sql = """
-                SELECT dph.*, m.descripcion as nombre_moneda
+                SELECT m.descripcion as nombre_moneda, dph.*
                 FROM documentos_ped_historia dph
                 LEFT JOIN monedas m ON dph.moneda = m.moneda
                 WHERE dph.sw = 3 AND numero = :oc AND anulado = 0
             """
             result = self.db.execute(text(sql), {"oc": oc}).fetchone()
-            registros_dict = [dict(row._mapping) for row in result]
+            registros_dict = dict(result._mapping) if result else {}
 
             # Retornamos la información.
             return registros_dict
