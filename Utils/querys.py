@@ -1,6 +1,7 @@
 from Utils.tools import Tools, CustomException
 from sqlalchemy import text
 from datetime import datetime
+from typing import Dict, Any, List, Tuple, Set
 
 class Querys:
 
@@ -604,7 +605,7 @@ class Querys:
                 WHERE dph.sw = 3 AND numero = :oc AND anulado = 0
             """
             result = self.db.execute(text(sql), {"oc": oc}).fetchone()
-            registros_dict = dict(result._mapping) if result else {}
+            registros_dict = dict(result._mapping) if result else None
 
             # Retornamos la información.
             return registros_dict
@@ -830,3 +831,394 @@ class Querys:
             raise CustomException("Error al obtener email por usuario.")
         finally:
             self.db.close()
+
+    # Query para obtener tercero por NIT
+    def buscar_tercero(self, nit):
+        try:
+            sql = """ SELECT * FROM terceros WHERE nit = :nit """
+            result = self.db.execute(text(sql), {"nit": nit}).fetchone()
+            return dict(result._mapping) if result else None
+        except Exception as e:
+            print(f"Error al obtener tercero por NIT: {e}")
+            raise CustomException("Error al obtener tercero por NIT.")
+        finally:
+            self.db.close()
+
+    # Query para obtener condición de pago
+    def obtener_condicion_pago(self, condicion):
+        try:
+            sql = """ SELECT descripcion FROM condiciones_pago WHERE condicion = :condicion """
+            result = self.db.execute(text(sql), {"condicion": condicion}).fetchone()
+            if not result:
+                raise CustomException("Condición de pago no encontrada.")
+            return dict(result._mapping)["descripcion"]
+        except CustomException as e:
+            print(f"Error al obtener condición de pago: {e}")
+            raise CustomException(f"{e}")
+        finally:
+            self.db.close()
+
+    # def obtener_detalles_oc(self, orden: str):
+    #     sql = """
+    #     SELECT numero, codigo, seq, adicional, cantidad, valor_unitario, porcentaje_descuento, und,
+    #         vlr_unit = CASE 
+    #             WHEN porcentaje_descuento <> 0 THEN valor_unitario * ((100 - porcentaje_descuento) / 100)
+    #             ELSE valor_unitario
+    #         END,
+    #         total = cantidad * (
+    #             CASE 
+    #                 WHEN porcentaje_descuento <> 0 THEN valor_unitario * ((100 - porcentaje_descuento) / 100)
+    #                 ELSE valor_unitario
+    #             END
+    #         ),
+    #         adic = isnull(adicional, 1)
+    #     FROM documentos_lin_ped_historia
+    #     WHERE sw = 3 AND numero = :orden
+    #     """
+    #     result = self.db.execute(text(sql), {"orden": orden}).fetchall()
+        
+    #     # Mapear filas a dict
+    #     return [dict(row._mapping) for row in result] if result else []
+
+    def _parse_pedido_from_adic(self, adic: str) -> Tuple[str, str, bool]:
+        """
+        Devuelve (pedido, nota, es_stock)
+        - STOCK*  => ("--", "", True)
+        - len=5   => (adic, "", False)
+        - len>5   => (adic[:5], adic, False)
+        - otros   => ("", "", False)
+        """
+        if not adic:
+            return ("", "", False)
+        adic = adic.strip()
+        if adic.upper().startswith("STOCK"):
+            return ("--", "", True)
+        if len(adic) == 5:
+            return (adic, "", False)
+        if len(adic) > 5:
+            return (adic[:5], adic, False)
+        return ("", "", False)
+
+    def _round2(self, x):
+        return None if x is None else round(float(x), 2)
+
+    def build_oc_detalle(self, orden: str, moneda: str, dolar3: float, euro3: float) -> Dict[str, Any]:
+        """
+        Retorna:
+        {
+        'orden': str,
+        'conf': 0|1,
+        'items': [ { ...campos calculados... } ],
+        'totales': { 'costotal': float, 'totalprecio': float, 'utilidadtotal': float }
+        }
+        """
+        # 1) Traer items de la OC (historia)
+        rows = self.db.execute(text("""
+            SELECT
+                numero,
+                codigo,
+                seq,
+                adicional,
+                cantidad,
+                valor_unitario,
+                porcentaje_descuento,
+                und,
+                cantidad * valor_unitario * ((100 - porcentaje_descuento)/100.0) AS total,
+                ISNULL(adicional, 1) AS adic
+            FROM documentos_lin_ped_historia
+            WHERE sw = 3 AND numero = :orden
+        """), {"orden": orden}).fetchall()
+
+        if not rows:
+            return {"orden": orden, "conf": 0, "items": [], "totales": {"costotal": 0.0, "totalprecio": 0.0, "utilidadtotal": 0.0}}
+
+        items_base = [dict(r._mapping) for r in rows]
+
+        # Conjuntos para batch queries
+        codigos: Set[str] = set()
+        pedidos_necesarios: Set[str] = set()
+
+        # Pre-proceso adic y vlr_unit
+        for it in items_base:
+            it["porcentaje_descuento"] = it.get("porcentaje_descuento") or 0
+            it["vlr_unit"] = it["valor_unitario"] * ((100 - it["porcentaje_descuento"]) / 100.0) if it["porcentaje_descuento"] else it["valor_unitario"]
+
+            pedido, nota, es_stock = self._parse_pedido_from_adic(str(it.get("adic", "") or ""))
+            it["pedido"] = pedido
+            it["nota"] = nota
+            it["es_stock"] = es_stock
+
+            codigos.add(it["codigo"])
+            if pedido and pedido != "--":
+                pedidos_necesarios.add(pedido)
+
+        # 2) STOCK por código (excluye bodegas)
+        stock_map = {}
+        print(f"codigos: {codigos}")
+        if codigos:
+            stock_rows = self.db.execute(text(f"""
+                SELECT codigo, SUM(stock) AS stockk
+                FROM v_referencias_sto_hoy
+                WHERE bodega NOT IN (3,4,7,8,9,19,20,21,22)
+                AND codigo IN :codigos
+                AND ano = YEAR(GETDATE())
+                AND mes = MONTH(GETDATE())
+                GROUP BY codigo
+            """), {"codigos": tuple(codigos)}).fetchall()
+            for r in stock_rows:
+                v = int(r.stockk or 0)
+                stock_map[r.codigo] = max(v, 0)
+
+        # 3) Pedidos pendientes (sw=1) por código
+        pedidoc_map = {}
+        ped_rows = self.db.execute(text(f"""
+            SELECT l.codigo, SUM(l.cantidad - l.cantidad_despachada) AS debe
+            FROM documentos_lin_ped l
+            JOIN documentos_ped d
+            ON l.sw = d.sw AND l.numero = d.numero AND l.bodega = d.bodega
+            WHERE d.sw = 1 AND l.codigo IN :codigos
+            GROUP BY l.codigo
+        """), {"codigos": tuple(codigos)}).fetchall()
+        for r in ped_rows:
+            pedidoc_map[r.codigo] = int(r.debe or 0)
+
+        # 4) Otras OCs (sw=3) por código (excluye esta numero)
+        otraoc_map = {}
+        oc_rows = self.db.execute(text(f"""
+            SELECT codigo, SUM(cantidad - cantidad_despachada) AS otraoc
+            FROM documentos_lin_ped
+            WHERE sw = 3 AND numero <> :orden AND codigo IN :codigos
+            GROUP BY codigo
+        """), {"orden": orden, "codigos": tuple(codigos)}).fetchall()
+        for r in oc_rows:
+            v = int(r.otraoc or 0)
+            otraoc_map[r.codigo] = max(v, 0)
+
+        # 5) Costos (preferir FOB; si no, costo_base)
+        costo_fob = {}
+        if codigos:
+            for r in self.db.execute(text("SELECT codigo, costo_unitario_fob FROM referencias_imp WHERE codigo IN :codigos"),
+                                {"codigos": tuple(codigos)}):
+                if r.costo_unitario_fob is not None:
+                    costo_fob[r.codigo] = float(r.costo_unitario_fob)
+
+        costo_base = {}
+        if codigos:
+            for r in self.db.execute(text("SELECT codigo, costo_base FROM ref_gen_costo WHERE codigo IN :codigos"),
+                                {"codigos": tuple(codigos)}):
+                if r.costo_base is not None:
+                    costo_base[r.codigo] = float(r.costo_base)
+
+        # 6) Referencias (descripcion + clase) y Clase→descripcion (marca)
+        ref_map = {}
+        if codigos:
+            for r in self.db.execute(text("SELECT codigo, descripcion, clase, und_vta FROM referencias WHERE codigo IN :codigos"),
+                                {"codigos": tuple(codigos)}):
+                ref_map[r.codigo] = {"descripcion": r.descripcion, "clase": r.clase, "und_vta": r.und_vta}
+
+        clases: Set[str] = set([v["clase"] for v in ref_map.values() if v.get("clase")])
+        clase_desc = {}
+        if clases:
+            for r in self.db.execute(text("SELECT clase, descripcion FROM referencias_cla WHERE clase IN :clases"),
+                                {"clases": tuple(clases)}):
+                clase_desc[r.clase] = r.descripcion
+
+        # 7) Datos por pedido (si hay)
+        # 7.1 documentos_ped_historia (sw=1) para moneda y nit
+        ped_info = {}       # numero -> {moneda, nit}
+        nits: Set[str] = set()
+        if pedidos_necesarios:
+            for r in self.db.execute(text("""
+                SELECT numero, moneda, nit
+                FROM documentos_ped_historia
+                WHERE sw = 1 AND numero IN :peds
+            """), {"peds": tuple(pedidos_necesarios)}):
+                ped_info[r.numero] = {"moneda": r.moneda, "nit": r.nit}
+                if r.nit: nits.add(r.nit)
+
+        # 7.2 documentos_lin_ped (sw=1) para valor_unitario/adicional/cantidad por (numero,codigo)
+        ped_line_map = {}   # (numero,codigo) -> {valor_unitario, adicional, cantidad}
+        if pedidos_necesarios:
+            for r in self.db.execute(text("""
+                SELECT numero, codigo, valor_unitario, adicional, cantidad
+                FROM documentos_lin_ped
+                WHERE sw = 1 AND numero IN :peds AND codigo IN :codigos
+            """), {"peds": tuple(pedidos_necesarios), "codigos": tuple(codigos)}):
+                ped_line_map[(r.numero, r.codigo)] = {
+                    "valor_unitario": float(r.valor_unitario or 0),
+                    "adicional": r.adicional,
+                    "cantidad": float(r.cantidad or 0),
+                }
+
+        # 7.3 terceros → nombre y ciudad/dpto
+        ter_map = {}        # nit -> {nombres, y_ciudad, y_dpto}
+        if nits:
+            for r in self.db.execute(text("""
+                SELECT nit, nombres, y_ciudad, y_dpto
+                FROM terceros
+                WHERE nit IN :nits
+            """), {"nits": tuple(nits)}):
+                ter_map[r.nit] = {"nombres": r.nombres, "y_ciudad": r.y_ciudad, "y_dpto": r.y_dpto}
+
+        # 7.4 y_ciudades → descripción (ciudad)
+        ciudad_desc_map = {}  # (ciudad,dpto) -> descripcion
+        ciudad_keys = set()
+        for nit, t in ter_map.items():
+            if t.get("y_ciudad") and t.get("y_dpto"):
+                ciudad_keys.add((t["y_ciudad"], t["y_dpto"]))
+        if ciudad_keys:
+            # arma parámetros IN para tupla compuesta con OR
+            # más simple: traer todas y filtrar en Python (si el dataset no es enorme)
+            for (ciudad, dpto) in ciudad_keys:
+                r = self.db.execute(text("""
+                    SELECT descripcion
+                    FROM y_ciudades
+                    WHERE ciudad = :ciudad AND departamento = :dpto
+                """), {"ciudad": ciudad, "dpto": dpto}).fetchone()
+                if r:
+                    ciudad_desc_map[(ciudad, dpto)] = r.descripcion
+
+        # 8) Construir respuesta por ítem
+        conf = 0
+        costotal = 0.0
+        totalprecio = 0.0
+        out_items: List[Dict[str, Any]] = []
+
+        for it in items_base:
+            codigo = it["codigo"]
+            cantidad = float(it["cantidad"] or 0)
+            vlr_unit = float(it["vlr_unit"] or 0)
+            und = it.get("und")
+
+            # stock/pedido/otra oc
+            stockp = int(stock_map.get(codigo, 0))
+            pedidoc = int(pedidoc_map.get(codigo, 0))
+            totaloc = int(otraoc_map.get(codigo, 0))
+
+            # referencia + marca
+            refd = ref_map.get(codigo, {})
+            ref_descripcion = refd.get("descripcion")
+            marca = clase_desc.get(refd.get("clase"))
+
+            # costo preferencia: FOB -> base
+            if codigo in costo_fob:
+                costo = float(costo_fob[codigo])
+            else:
+                costo = float(costo_base.get(codigo, 0))
+
+            # Datos de pedido (si no es STOCK)
+            monedap = None
+            valor_item = 0.0
+            fecha_entrega = "&nbsp;"
+            cliente = None
+            ciudad = None
+
+            if it["pedido"] and it["pedido"] != "--":
+                pednum = it["pedido"]
+
+                # moneda/nit del pedido
+                pinfo = ped_info.get(pednum, {})
+                monedap = pinfo.get("moneda")
+                nit = pinfo.get("nit")
+
+                # línea del pedido para este código
+                pl = ped_line_map.get((pednum, codigo))
+                if pl:
+                    valor_item = float(pl["valor_unitario"] or 0)
+                    # Si monedap=2 en ASP multiplicaban por dolar3 (aquí haremos igual)
+                    if monedap == 2:
+                        valor_item = valor_item * float(dolar3)
+                    fecha_entrega = pl.get("adicional") or "&nbsp;"
+
+                # cliente/ciudad
+                if nit and nit in ter_map:
+                    t = ter_map[nit]
+                    cliente = t.get("nombres")
+                    key = (t.get("y_ciudad"), t.get("y_dpto"))
+                    ciudad = ciudad_desc_map.get(key)
+
+            # Utilidades por ítem
+            utilidad = 0.0
+            utilidadt = 0.0
+            if valor_item:
+                if moneda in ("2", "6"):
+                    utilidad = ((valor_item - (vlr_unit * float(dolar3))) / valor_item) * 100
+                    utilidadt = (((valor_item * cantidad) - ((vlr_unit * cantidad) * float(dolar3))) / (valor_item * cantidad)) * 100
+                elif moneda == "3":
+                    utilidad = ((valor_item - (vlr_unit * float(euro3))) / valor_item) * 100
+                else:  # "1" o None
+                    utilidad = ((valor_item - vlr_unit) / valor_item) * 100
+                    utilidadt = (((valor_item * cantidad) - (vlr_unit * cantidad)) / (valor_item * cantidad)) * 100
+
+            # Conflicto si redondeos difieren
+            if round(utilidad or 0, 0) != round(utilidadt or 0, 0):
+                conf = 1
+
+            # Ajuste de valor_item si monedap=2 (en ASP dividían al imprimir unitario)
+            if monedap == 2 and valor_item:
+                valor_item = valor_item / float(dolar3)
+
+            # Costo total por ítem (según moneda)
+            if moneda == "2":
+                costotal += float(it["total"] or 0) * float(dolar3)
+                costo_total_item = float(it["total"] or 0) * float(dolar3)
+            elif moneda == "3":
+                costotal += float(it["total"] or 0) * float(euro3)
+                costo_total_item = float(it["total"] or 0) * float(euro3)
+            else:
+                costotal += float(it["total"] or 0)
+                costo_total_item = float(it["total"] or 0)
+
+            # Precio total por ítem
+            precioxitem = (valor_item or 0) * cantidad
+            totalprecio += precioxitem
+
+            # bandera cantidad en rojo si no cuadra:
+            cantidad_en_conflicto = int(pedidoc) != (int(cantidad) + (int(stockp) + int(totaloc)))
+            if cantidad_en_conflicto:
+                conf = 1
+
+            out_items.append({
+                "numero": it["numero"],
+                "codigo": codigo,
+                "seq": it["seq"],
+                "nota": it["nota"],
+                "cantidad": int(cantidad),
+                "pedidoc": int(pedidoc),
+                "stock": int(stockp),
+                "otras_oc": int(totaloc),
+                "descripcion": ref_descripcion,
+                "marca": marca,
+                "und": und,
+                "costo": self._round2(costo),
+                "vlr_unit": self._round2(vlr_unit),
+                "valor_item": self._round2(valor_item),
+                "utilidad": round(utilidad or 0, 0),
+                "cliente": cliente or ("STOCK AVANTIKA" if it["es_stock"] else None),
+                "ciudad": ciudad or ("BARRANQUILLA" if it["es_stock"] else None),
+                "fecha_entrega": fecha_entrega,
+                "costo_total_item": self._round2(costo_total_item),
+                "precio_total_item": self._round2(precioxitem),
+                "cantidad_conflictiva": cantidad_en_conflicto
+            })
+
+        # 9) Utilidad total
+        utilidadtotal = 0.0
+        if totalprecio:
+            if (monedap == 2):  # si el último monedap importa; en el ASP usan monedap que viene de un pedido
+                utilidadtotal = (((totalprecio * float(dolar3)) - costotal) / (totalprecio * float(dolar3))) * 100
+            elif (monedap == 3):
+                utilidadtotal = (((totalprecio * float(euro3)) - costotal) / (totalprecio * float(euro3))) * 100
+            else:
+                utilidadtotal = ((totalprecio - costotal) / totalprecio) * 100
+
+        return {
+            "orden": orden,
+            "conf": conf,
+            "items": out_items,
+            "totales": {
+                "costotal": self._round2(costotal),
+                "totalprecio": self._round2(totalprecio),
+                "utilidadtotal": round(utilidadtotal or 0, 0)
+            }
+        }
