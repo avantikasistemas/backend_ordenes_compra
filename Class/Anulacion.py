@@ -69,10 +69,11 @@ class Anulacion:
             # Construimos el cuerpo del correo electrónico
             body_email = self.build_anulacion_email_html(data_oc, link, data)
             
-            to_email = 'gerencia@avantika.com.co'
-            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
-            if mail not in cc_emails:
-                cc_emails.append(mail)
+            to_email = 'sistemas@avantika.com.co'
+            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
+            cc_emails = []
+            # if mail not in cc_emails:
+            #     cc_emails.append(mail)
 
             # Ruta absoluta al logo en la raíz del backend
             logo_path = os.path.join(os.getcwd(), "logo.png")
@@ -303,9 +304,10 @@ class Anulacion:
                 body_email = self.build_notificacion_email_html(msg)
                 
             to_email = mail
-            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
-            if mail not in cc_emails:
-                cc_emails.append(mail)
+            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
+            cc_emails = []
+            # if mail not in cc_emails:
+            #     cc_emails.append(mail)
 
             self.tools.send_email_individual(
                 to_email=to_email,
@@ -313,7 +315,7 @@ class Anulacion:
                 subject=f"Anulación orden de compra #: {numero_oc}",
                 body=body_email,
                 logo_path=None,
-                mail_sender='gerencia@avantika.com.co'
+                mail_sender='sistemas@avantika.com.co'
             )
 
             return self.tools.output(200, msg_respuesta)
