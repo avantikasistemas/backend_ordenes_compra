@@ -593,6 +593,8 @@ class Querys:
             print(f"Error al consultar registros: {e}")
             self.db.rollback()
             raise CustomException("Error al consultar registros.")
+        finally:
+            self.db.close()
 
     # Query que busca la orden de compra nacional
     def buscar_oc_nacional(self, oc, tasa, factor):
@@ -613,6 +615,8 @@ class Querys:
         except Exception as e:
             print(f"Error al obtener información de orden de compra: {e}")
             raise CustomException("Error al obtener información de orden de compra.")
+        finally:
+            self.db.close()
 
     # Query para guardar seguimiento
     def guardar_seguimiento(self, data: dict):
@@ -690,6 +694,8 @@ class Querys:
         except Exception as e:
             print(f"Error al verificar si la OC está anulada: {e}")
             raise CustomException("Error al verificar si la OC está anulada.")
+        finally:
+            self.db.close()
 
     # Query para guardar registro de anulación
     def guardar_registro_anulacion(self, data: dict):
@@ -858,6 +864,58 @@ class Querys:
         finally:
             self.db.close()
 
+    # Query para obtener usuario que creó la OC
+    def obtener_usuario_oc(self, oc: str):
+        try:
+            sql = """
+                SELECT u.des_usuario, u.usuario 
+                FROM usuarios u
+                WHERE u.usuario = (
+                    SELECT usuario FROM documentos_ped 
+                    WHERE sw = 3 AND numero = :oc
+                ) 
+                AND u.bloqueado IS NULL
+            """
+            result = self.db.execute(text(sql), {"oc": oc}).fetchone()
+            if result:
+                return {
+                    "des_usuario": result[0],
+                    "usuario": result[1]
+                }
+            return None
+        except Exception as e:
+            print(f"Error al obtener usuario de OC: {e}")
+            raise CustomException("Error al obtener usuario de OC.")
+        finally:
+            self.db.close()
+
+    # Query para obtener historial de autorizaciones
+    def obtener_historial_autorizaciones(self, oc: str):
+        try:
+            sql = """
+                SELECT numero, autorizacion, equipo, usuario, fecha, valor_total 
+                FROM dbo.Distru_Autorizacion_Compra 
+                WHERE numero = :oc 
+                ORDER BY fecha DESC
+            """
+            rows = self.db.execute(text(sql), {"oc": oc}).fetchall()
+            autorizaciones = []
+            for row in rows:
+                autorizaciones.append({
+                    "numero": row.numero,
+                    "autorizacion": row.autorizacion,
+                    "equipo": row.equipo,
+                    "usuario": row.usuario,
+                    "fecha": row.fecha.strftime("%Y-%m-%d %H:%M:%S") if row.fecha else None,
+                    "valor_total": float(row.valor_total) if row.valor_total else 0
+                })
+            return autorizaciones
+        except Exception as e:
+            print(f"Error al obtener historial de autorizaciones: {e}")
+            raise CustomException("Error al obtener historial de autorizaciones.")
+        finally:
+            self.db.close()
+
     # def obtener_detalles_oc(self, orden: str):
     #     sql = """
     #     SELECT numero, codigo, seq, adicional, cantidad, valor_unitario, porcentaje_descuento, und,
@@ -888,15 +946,24 @@ class Querys:
         - len>5   => (adic[:5], adic, False)
         - otros   => ("", "", False)
         """
-        if not adic:
+        if not adic or adic is None:
             return ("", "", False)
-        adic = adic.strip()
-        if adic.upper().startswith("STOCK"):
+        
+        adic_str = str(adic).strip()
+        
+        # Si es "1" (valor por defecto de ISNULL), retornar vacío
+        if adic_str == "1":
+            return ("", "", False)
+        
+        if adic_str.upper().startswith("STOCK"):
             return ("--", "", True)
-        if len(adic) == 5:
-            return (adic, "", False)
-        if len(adic) > 5:
-            return (adic[:5], adic, False)
+        
+        if len(adic_str) == 5:
+            return (adic_str, "", False)
+        
+        if len(adic_str) > 5:
+            return (adic_str[:5], adic_str, False)
+        
         return ("", "", False)
 
     def _round2(self, x):
@@ -954,97 +1021,164 @@ class Querys:
 
         # 2) STOCK por código (excluye bodegas)
         stock_map = {}
-        print(f"codigos: {codigos}")
         if codigos:
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            
             stock_rows = self.db.execute(text(f"""
                 SELECT codigo, SUM(stock) AS stockk
                 FROM v_referencias_sto_hoy
                 WHERE bodega NOT IN (3,4,7,8,9,19,20,21,22)
-                AND codigo IN :codigos
+                AND codigo IN ({placeholders})
                 AND ano = YEAR(GETDATE())
                 AND mes = MONTH(GETDATE())
                 GROUP BY codigo
-            """), {"codigos": tuple(codigos)}).fetchall()
+            """), params).fetchall()
             for r in stock_rows:
                 v = int(r.stockk or 0)
                 stock_map[r.codigo] = max(v, 0)
 
         # 3) Pedidos pendientes (sw=1) por código
         pedidoc_map = {}
-        ped_rows = self.db.execute(text(f"""
-            SELECT l.codigo, SUM(l.cantidad - l.cantidad_despachada) AS debe
-            FROM documentos_lin_ped l
-            JOIN documentos_ped d
-            ON l.sw = d.sw AND l.numero = d.numero AND l.bodega = d.bodega
-            WHERE d.sw = 1 AND l.codigo IN :codigos
-            GROUP BY l.codigo
-        """), {"codigos": tuple(codigos)}).fetchall()
-        for r in ped_rows:
-            pedidoc_map[r.codigo] = int(r.debe or 0)
+        if codigos:
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            
+            ped_rows = self.db.execute(text(f"""
+                SELECT l.codigo, SUM(l.cantidad - l.cantidad_despachada) AS debe
+                FROM documentos_lin_ped l
+                JOIN documentos_ped d
+                ON l.sw = d.sw AND l.numero = d.numero AND l.bodega = d.bodega
+                WHERE d.sw = 1 AND l.codigo IN ({placeholders})
+                GROUP BY l.codigo
+            """), params).fetchall()
+            for r in ped_rows:
+                pedidoc_map[r.codigo] = int(r.debe or 0)
 
         # 4) Otras OCs (sw=3) por código (excluye esta numero)
         otraoc_map = {}
-        oc_rows = self.db.execute(text(f"""
-            SELECT codigo, SUM(cantidad - cantidad_despachada) AS otraoc
-            FROM documentos_lin_ped
-            WHERE sw = 3 AND numero <> :orden AND codigo IN :codigos
-            GROUP BY codigo
-        """), {"orden": orden, "codigos": tuple(codigos)}).fetchall()
-        for r in oc_rows:
-            v = int(r.otraoc or 0)
-            otraoc_map[r.codigo] = max(v, 0)
+        if codigos:
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            params['orden'] = orden
+            
+            oc_rows = self.db.execute(text(f"""
+                SELECT codigo, SUM(cantidad - cantidad_despachada) AS otraoc
+                FROM documentos_lin_ped
+                WHERE sw = 3 AND numero <> :orden AND codigo IN ({placeholders})
+                GROUP BY codigo
+            """), params).fetchall()
+            for r in oc_rows:
+                v = int(r.otraoc or 0)
+                otraoc_map[r.codigo] = max(v, 0)
 
         # 5) Costos (preferir FOB; si no, costo_base)
         costo_fob = {}
         if codigos:
-            for r in self.db.execute(text("SELECT codigo, costo_unitario_fob FROM referencias_imp WHERE codigo IN :codigos"),
-                                {"codigos": tuple(codigos)}):
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            
+            for r in self.db.execute(text(f"SELECT codigo, costo_unitario_fob FROM referencias_imp WHERE codigo IN ({placeholders})"),
+                                params):
                 if r.costo_unitario_fob is not None:
                     costo_fob[r.codigo] = float(r.costo_unitario_fob)
 
         costo_base = {}
         if codigos:
-            for r in self.db.execute(text("SELECT codigo, costo_base FROM ref_gen_costo WHERE codigo IN :codigos"),
-                                {"codigos": tuple(codigos)}):
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            
+            for r in self.db.execute(text(f"SELECT codigo, costo_base FROM ref_gen_costo WHERE codigo IN ({placeholders})"),
+                                params):
                 if r.costo_base is not None:
                     costo_base[r.codigo] = float(r.costo_base)
 
         # 6) Referencias (descripcion + clase) y Clase→descripcion (marca)
         ref_map = {}
         if codigos:
-            for r in self.db.execute(text("SELECT codigo, descripcion, clase, und_vta FROM referencias WHERE codigo IN :codigos"),
-                                {"codigos": tuple(codigos)}):
+            codigos_list = list(codigos)
+            placeholders = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'cod{i}': cod for i, cod in enumerate(codigos_list)}
+            
+            for r in self.db.execute(text(f"SELECT codigo, descripcion, clase, und_vta FROM referencias WHERE codigo IN ({placeholders})"),
+                                params):
                 ref_map[r.codigo] = {"descripcion": r.descripcion, "clase": r.clase, "und_vta": r.und_vta}
 
         clases: Set[str] = set([v["clase"] for v in ref_map.values() if v.get("clase")])
         clase_desc = {}
         if clases:
-            for r in self.db.execute(text("SELECT clase, descripcion FROM referencias_cla WHERE clase IN :clases"),
-                                {"clases": tuple(clases)}):
+            clases_list = list(clases)
+            placeholders = ', '.join([f':cls{i}' for i in range(len(clases_list))])
+            params = {f'cls{i}': cls for i, cls in enumerate(clases_list)}
+            
+            for r in self.db.execute(text(f"SELECT clase, descripcion FROM referencias_cla WHERE clase IN ({placeholders})"),
+                                params):
                 clase_desc[r.clase] = r.descripcion
 
         # 7) Datos por pedido (si hay)
-        # 7.1 documentos_ped_historia (sw=1) para moneda y nit
+        # 7.1 Buscar pedidos - PRIMERO en documentos_ped_historia, luego en documentos_ped
         ped_info = {}       # numero -> {moneda, nit}
         nits: Set[str] = set()
         if pedidos_necesarios:
-            for r in self.db.execute(text("""
+            peds_list = list(pedidos_necesarios)
+            placeholders = ', '.join([f':ped{i}' for i in range(len(peds_list))])
+            params = {f'ped{i}': ped for i, ped in enumerate(peds_list)}
+            
+            # Intentar primero en documentos_ped_historia (pedidos de página web)
+            for r in self.db.execute(text(f"""
                 SELECT numero, moneda, nit
                 FROM documentos_ped_historia
-                WHERE sw = 1 AND numero IN :peds
-            """), {"peds": tuple(pedidos_necesarios)}):
-                ped_info[r.numero] = {"moneda": r.moneda, "nit": r.nit}
-                if r.nit: nits.add(r.nit)
+                WHERE sw = 1 AND numero IN ({placeholders})
+            """), params):
+                # Solo añadir si tiene nit válido (moneda puede ser NULL, se trata como 1)
+                if r.nit is not None:
+                    # Si moneda es NULL, tratarla como 1 (pesos) según lógica ASP
+                    moneda_pedido = r.moneda if r.moneda is not None else 1
+                    # Convertir numero a string para mantener consistencia de tipos
+                    ped_info[str(r.numero)] = {"moneda": moneda_pedido, "nit": r.nit}
+                    if r.nit: nits.add(r.nit)
+            
+            # Para los pedidos que NO se encontraron o tienen datos NULL, buscar en documentos_ped
+            pedidos_faltantes = set(peds_list) - set(ped_info.keys())
+            if pedidos_faltantes:
+                peds_faltantes_list = list(pedidos_faltantes)
+                placeholders2 = ', '.join([f':ped{i}' for i in range(len(peds_faltantes_list))])
+                params2 = {f'ped{i}': ped for i, ped in enumerate(peds_faltantes_list)}
+                
+                for r in self.db.execute(text(f"""
+                    SELECT numero, moneda, nit
+                    FROM documentos_ped
+                    WHERE sw = 1 AND numero IN ({placeholders2})
+                """), params2):
+                    # Si moneda es NULL, tratarla como 1 (pesos) según lógica ASP
+                    moneda_pedido = r.moneda if r.moneda is not None else 1
+                    # Convertir numero a string para mantener consistencia de tipos
+                    ped_info[str(r.numero)] = {"moneda": moneda_pedido, "nit": r.nit}
+                    if r.nit: nits.add(r.nit)
 
         # 7.2 documentos_lin_ped (sw=1) para valor_unitario/adicional/cantidad por (numero,codigo)
+        # IMPORTANTE: Usar documentos_lin_ped sin _historia para pedidos activos
         ped_line_map = {}   # (numero,codigo) -> {valor_unitario, adicional, cantidad}
-        if pedidos_necesarios:
-            for r in self.db.execute(text("""
+        if pedidos_necesarios and codigos:
+            peds_list = list(pedidos_necesarios)
+            codigos_list = list(codigos)
+            placeholders_peds = ', '.join([f':ped{i}' for i in range(len(peds_list))])
+            placeholders_cods = ', '.join([f':cod{i}' for i in range(len(codigos_list))])
+            params = {f'ped{i}': ped for i, ped in enumerate(peds_list)}
+            params.update({f'cod{i}': cod for i, cod in enumerate(codigos_list)})
+            
+            for r in self.db.execute(text(f"""
                 SELECT numero, codigo, valor_unitario, adicional, cantidad
                 FROM documentos_lin_ped
-                WHERE sw = 1 AND numero IN :peds AND codigo IN :codigos
-            """), {"peds": tuple(pedidos_necesarios), "codigos": tuple(codigos)}):
-                ped_line_map[(r.numero, r.codigo)] = {
+                WHERE sw = 1 AND numero IN ({placeholders_peds}) AND codigo IN ({placeholders_cods})
+            """), params):
+                # Convertir numero a string para mantener consistencia de tipos
+                ped_line_map[(str(r.numero), r.codigo)] = {
                     "valor_unitario": float(r.valor_unitario or 0),
                     "adicional": r.adicional,
                     "cantidad": float(r.cantidad or 0),
@@ -1053,11 +1187,15 @@ class Querys:
         # 7.3 terceros → nombre y ciudad/dpto
         ter_map = {}        # nit -> {nombres, y_ciudad, y_dpto}
         if nits:
-            for r in self.db.execute(text("""
+            nits_list = list(nits)
+            placeholders = ', '.join([f':nit{i}' for i in range(len(nits_list))])
+            params = {f'nit{i}': nit for i, nit in enumerate(nits_list)}
+            
+            for r in self.db.execute(text(f"""
                 SELECT nit, nombres, y_ciudad, y_dpto
                 FROM terceros
-                WHERE nit IN :nits
-            """), {"nits": tuple(nits)}):
+                WHERE nit IN ({placeholders})
+            """), params):
                 ter_map[r.nit] = {"nombres": r.nombres, "y_ciudad": r.y_ciudad, "y_dpto": r.y_dpto}
 
         # 7.4 y_ciudades → descripción (ciudad)
@@ -1110,10 +1248,15 @@ class Querys:
             monedap = None
             valor_item = 0.0
             fecha_entrega = "&nbsp;"
+            cantidadp = 0
             cliente = None
             ciudad = None
 
-            if it["pedido"] and it["pedido"] != "--":
+            # Si es STOCK, asignar valores por defecto
+            if it["es_stock"]:
+                cliente = "STOCK AVANTIKA"
+                ciudad = "BARRANQUILLA"
+            elif it["pedido"] and it["pedido"] != "--":
                 pednum = it["pedido"]
 
                 # moneda/nit del pedido
@@ -1123,12 +1266,21 @@ class Querys:
 
                 # línea del pedido para este código
                 pl = ped_line_map.get((pednum, codigo))
+                
                 if pl:
                     valor_item = float(pl["valor_unitario"] or 0)
+                    cantidadp = float(pl["cantidad"] or 0)
+                    
                     # Si monedap=2 en ASP multiplicaban por dolar3 (aquí haremos igual)
                     if monedap == 2:
                         valor_item = valor_item * float(dolar3)
+                    
                     fecha_entrega = pl.get("adicional") or "&nbsp;"
+                else:
+                    # Si no se encuentra la línea del pedido, valores en 0
+                    valor_item = 0.0
+                    fecha_entrega = "&nbsp;"
+                    cantidadp = 0
 
                 # cliente/ciudad
                 if nit and nit in ter_map:
@@ -1136,6 +1288,10 @@ class Querys:
                     cliente = t.get("nombres")
                     key = (t.get("y_ciudad"), t.get("y_dpto"))
                     ciudad = ciudad_desc_map.get(key)
+            else:
+                # Si no hay pedido y no es STOCK, valores por defecto
+                valor_item = 0.0
+                fecha_entrega = "&nbsp;"
 
             # Utilidades por ítem
             utilidad = 0.0
@@ -1159,6 +1315,8 @@ class Querys:
                 valor_item = valor_item / float(dolar3)
 
             # Costo total por ítem (según moneda)
+            # NOTA: costotal (acumulado global) SIEMPRE debe ir en pesos para cálculos finales.
+            # costo_total_item (para mostrar en la tabla) debe ir en la moneda original para coincidir con el unitario.
             if moneda == "2":
                 costotal += float(it["total"] or 0) * float(dolar3)
                 costo_total_item = float(it["total"] or 0) * float(dolar3)
@@ -1222,3 +1380,127 @@ class Querys:
                 "utilidadtotal": round(utilidadtotal or 0, 0)
             }
         }
+
+    def obtener_datos_kit(self, pedido, codigo_kit):
+        """
+        Obtiene el detalle de un kit dado un pedido y código, usando la lógica del ASP antiguo.
+        """
+        try:
+            sql = """
+            SELECT 
+                dlph.codigo,
+                descripcion = (SELECT descripcion FROM referencias WHERE codigo = dlph.codigo),
+                cantidad_ped = dlph.cantidad,
+                cantidad_x_kit = 1,
+                valor_unit = dlph.valor_unitario,
+                costo = ISNULL((SELECT costo_unitario_fob FROM referencias_imp WHERE codigo = dlph.codigo), 0),
+                moneda_gen = (SELECT moneda FROM referencias_gen WHERE generico = (SELECT generico FROM referencias WHERE codigo = dlph.codigo))
+            FROM documentos_lin_ped_historia dlph
+            WHERE dlph.sw = 1 AND dlph.numero = :pedido AND dlph.codigo = :codigo_kit
+
+            UNION
+
+            SELECT 
+                codigo = h.CODIGO,
+                descripcion = (SELECT descripcion FROM referencias WHERE codigo = h.CODIGO),
+                cantidad_ped = SUM(h.cantidad),
+                cantidad_x_kit = E.cantidad_enlace,
+                valor_unit = h.valor_unitario,
+                costo = ISNULL((SELECT costo_unitario_fob FROM referencias_imp WHERE codigo = h.codigo), 0),
+                moneda_gen = (SELECT moneda FROM referencias_gen WHERE generico = (SELECT generico FROM referencias WHERE referencias.codigo = e.codigo_enlace))
+            FROM documentos_lin_ped_historia h
+            LEFT JOIN referencias_enlace E ON h.codigo = E.codigo_enlace
+            WHERE h.sw = 1 AND h.numero = :pedido AND E.codigo = :codigo_kit
+            GROUP BY h.codigo, h.valor_unitario, e.codigo_enlace, E.cantidad_enlace
+            
+            ORDER BY valor_unit DESC
+            """
+            
+            params = {"pedido": pedido, "codigo_kit": codigo_kit}
+            result = self.db.execute(text(sql), params)
+            
+            # Mapear a lista de diccionarios
+            columns = result.keys()
+            results = []
+            for row in result.fetchall():
+                results.append(dict(zip(columns, row)))
+                
+            return results
+        except Exception as e:
+            print(f"Error en obtener_datos_kit: {e}")
+            return []
+
+    def obtener_pedido_de_oc(self, oc, codigo_item):
+        """Busca el número de pedido asociado a una línea de OC para buscar el kit"""
+        try:
+            # Primero intentamos obtener el 'adicional' que suele guardar el número de pedido
+            sql = "SELECT TOP 1 adicional FROM documentos_lin_ped_historia WHERE sw=3 AND codigo=:codigo_item AND numero=:oc"
+            params = {"codigo_item": codigo_item, "oc": oc}
+            
+            result = self.db.execute(text(sql), params)
+            row = result.fetchone()
+            
+            if row:
+                return row[0]
+            return None
+        except Exception as e:
+            print(f"Error obtener_pedido_de_oc: {e}")
+            return None
+
+    def obtener_padre_kit(self, pedido, codigo_hijo):
+        """Busca si el código es hijo de un kit en ese pedido y devuelve el código del padre."""
+        try:
+            sql = """
+            SELECT DISTINCT e.codigo 
+            FROM referencias_enlace e
+            INNER JOIN documentos_lin_ped_historia h ON h.codigo = e.codigo
+            WHERE e.codigo_enlace = :codigo_hijo 
+            AND h.numero = :pedido
+            AND h.sw = 1
+            """
+            params = {"codigo_hijo": codigo_hijo, "pedido": pedido}
+            result = self.db.execute(text(sql), params)
+            row = result.fetchone()
+            if row:
+                return row[0]
+            return None
+        except Exception as e:
+            print(f"Error obtener_padre_kit: {e}")
+            return None
+
+    def obtener_valor_total_oc(self, oc):
+        try:
+            # Obtener el valor total de la orden sumando los items
+            # Se usa documentos_lin_ped_historia ya que es donde se consultan las OCs en este modulo
+            sql = """
+            SELECT SUM(cantidad * valor_unitario) as valor_total 
+            FROM documentos_lin_ped_historia 
+            WHERE numero = :oc AND sw = 3
+            """
+            result = self.db.execute(text(sql), {"oc": oc}).fetchone()
+            if result and result[0]:
+                return float(result[0])
+            return 0.0
+        except Exception as e:
+            print(f"Error obtener_valor_total_oc: {e}")
+            return 0.0
+
+    def registrar_autorizacion(self, oc, autorizacion, usuario, equipo, valor_total):
+        try:
+            sql = """
+                INSERT INTO Distru_Autorizacion_Compra (sw, numero, autorizacion, equipo, usuario, fecha, valor_total)
+                VALUES (3, :oc, :autorizacion, :equipo, :usuario, GETDATE(), :valor_total)
+            """
+            self.db.execute(text(sql), {
+                "oc": oc,
+                "autorizacion": autorizacion,
+                "equipo": equipo,
+                "usuario": usuario,
+                "valor_total": valor_total
+            })
+            self.db.commit()
+            return True
+        except Exception as e:
+            print(f"Error registrar_autorizacion: {e}")
+            self.db.rollback()
+            raise CustomException(f"Error al registrar autorización: {e}")
