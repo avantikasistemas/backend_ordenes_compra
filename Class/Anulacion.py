@@ -69,12 +69,10 @@ class Anulacion:
             # Construimos el cuerpo del correo electrónico
             body_email = self.build_anulacion_email_html(data_oc, link, data, path)
             
-            to_email = 'sistemas@avantika.com.co'
-            # to_email = 'gerencia@avantika.com.co'
-            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
-            # if mail not in cc_emails:
-            #     cc_emails.append(mail)
-            cc_emails = []
+            to_email = 'gerencia@avantika.com.co'
+            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
+            if mail not in cc_emails:
+                cc_emails.append(mail)
 
             # Ruta absoluta al logo en la raíz del backend
             logo_path = os.path.join(os.getcwd(), "logo.png")
