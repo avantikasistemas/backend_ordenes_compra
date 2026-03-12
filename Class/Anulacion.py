@@ -67,12 +67,14 @@ class Anulacion:
             link = urljoin(base_url.rstrip('/')+'/', path.lstrip('/'))
 
             # Construimos el cuerpo del correo electrónico
-            body_email = self.build_anulacion_email_html(data_oc, link, data)
+            body_email = self.build_anulacion_email_html(data_oc, link, data, path)
             
-            to_email = 'gerencia@avantika.com.co'
-            cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
-            if mail not in cc_emails:
-                cc_emails.append(mail)
+            to_email = 'sistemas@avantika.com.co'
+            # to_email = 'gerencia@avantika.com.co'
+            # cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
+            # if mail not in cc_emails:
+            #     cc_emails.append(mail)
+            cc_emails = []
 
             # Ruta absoluta al logo en la raíz del backend
             logo_path = os.path.join(os.getcwd(), "logo.png")
@@ -94,7 +96,7 @@ class Anulacion:
             raise CustomException(f"{e}")
 
     # Función para construir el cuerpo del correo electrónico de anulación
-    def build_anulacion_email_html(self, data_oc: dict, link: str, data: dict):
+    def build_anulacion_email_html(self, data_oc: dict, link: str, data: dict, path: str):
 
         logo_url = "cid:company_logo"
         # Construir tabla de ítems si existen
@@ -152,9 +154,14 @@ class Anulacion:
             </tr>
             """
 
-        # Links con parámetro de acción
+        # Links con parámetro de acción (red interna)
         link_aprobar = f"{link}?accion=1"
         link_rechazar = f"{link}?accion=0"
+
+        # Links para uso externo (fuera de la oficina)
+        external_base = f"http://190.131.218.34{path}"
+        link_aprobar_ext = f"{external_base}?accion=1"
+        link_rechazar_ext = f"{external_base}?accion=0"
 
         return f"""\
             <!DOCTYPE html>
@@ -235,6 +242,19 @@ class Anulacion:
                                     style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;text-decoration:none;background:#dc3545;color:#ffffff;padding:12px 20px;border-radius:8px;display:inline-block;margin-left:10px;">
                                     Rechazar Anulación
                                 </a>
+                                <div style="height:16px;line-height:16px;">&nbsp;</div>
+                                <!-- Botones para uso externo -->
+                                <!-- <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;margin-bottom:8px;">
+                                    Si se encuentra <strong>fuera de la oficina</strong>, use estos enlaces:
+                                </div>
+                                <a href="{link_aprobar_ext}"
+                                    style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;text-decoration:none;background:#0d6efd;color:#ffffff;padding:12px 20px;border-radius:8px;display:inline-block;margin-right:10px;opacity:0.85;">
+                                    Aprobar Anulación (fuera de oficina)
+                                </a>
+                                <a href="{link_rechazar_ext}"
+                                    style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;text-decoration:none;background:#dc3545;color:#ffffff;padding:12px 20px;border-radius:8px;display:inline-block;margin-left:10px;opacity:0.85;">
+                                    Rechazar Anulación (fuera de oficina)
+                                </a> -->
                                 <div style="height:8px;line-height:8px;">&nbsp;</div>
                                 <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;">
                                     Si los botones no funcionan, copia y pega uno de estos enlaces en tu navegador:<br>
@@ -301,11 +321,12 @@ class Anulacion:
                 
                 msg = f"La orden de compra No. {numero_oc} fue anulada."
                 body_email = self.build_notificacion_email_html(msg)
-                
+
             to_email = mail
             cc_emails = ['compras@avantika.com.co', 'direccion.abastecimiento@avantika.com.co', 'tic@avantika.com.co']
             if mail not in cc_emails:
                 cc_emails.append(mail)
+            cc_emails = []
 
             self.tools.send_email_individual(
                 to_email=to_email,

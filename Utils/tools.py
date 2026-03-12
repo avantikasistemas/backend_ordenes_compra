@@ -9,19 +9,14 @@ from dotenv import load_dotenv
 # from email import encoders
 # import json
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
+import base64
+import requests
 import pytz
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 # Cargar variables de entorno
 load_dotenv()
-
-SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 25))
 
 class Tools:
 
@@ -98,32 +93,105 @@ class Tools:
         valor_decimal = Decimal(value)
         return valor_decimal
 
+    def _get_graph_token_and_url(self):
+        """Obtiene el access token de Graph (desde BD si está vigente) y la URL base de Graph."""
+        from Config.db import engine
+        from sqlalchemy import text
+
+        with engine.connect() as conn:
+            # Verificar si hay un token vigente en BD
+            row = conn.execute(text(
+                "SELECT TOP 1 token, fecha_vencimiento "
+                "FROM dbo.intranet_graph_token WHERE estado = 1 ORDER BY id DESC"
+            )).fetchone()
+
+            # Obtener credenciales siempre (necesitamos la URL de Graph y datos de autenticación)
+            rows = conn.execute(text(
+                "SELECT nombre, valor FROM dbo.intranet_graph_credenciales"
+            )).fetchall()
+            creds = {r[0]: r[1] for r in rows}
+            graph_url = creds.get("MICROSOFT_URL_GRAPH", "https://graph.microsoft.com/v1.0/users/")
+
+            if row and row[1] > datetime.now():
+                return row[0], graph_url
+
+            # Token vencido o inexistente: solicitar uno nuevo
+            token_url = f"{creds['MICROSOFT_URL']}{creds['MICROSOFT_TENANT_ID']}/oauth2/v2.0/token"
+            resp = requests.post(token_url, data={
+                "grant_type": "client_credentials",
+                "client_id": creds["MICROSOFT_CLIENT_ID"],
+                "client_secret": creds["MICROSOFT_CLIENT_SECRET"],
+                "scope": "https://graph.microsoft.com/.default"
+            })
+            resp.raise_for_status()
+            token_json = resp.json()
+            new_token = token_json["access_token"]
+            expires_at = datetime.now() + timedelta(seconds=token_json.get("expires_in", 3600) - 300)
+
+            # Desactivar tokens anteriores y guardar el nuevo
+            conn.execute(text("UPDATE dbo.intranet_graph_token SET estado = 0 WHERE estado = 1"))
+            conn.execute(text(
+                "INSERT INTO dbo.intranet_graph_token (token, fecha_vencimiento, estado) "
+                "VALUES (:t, :fv, 1)"
+            ), {"t": new_token, "fv": expires_at})
+            conn.commit()
+
+            return new_token, graph_url
+
     # Función para enviar correos electrónicos
     def send_email_individual(self, to_email, cc_emails, subject, body, logo_path=None, mail_sender=None):
-        """Envía un correo electrónico a un destinatario con copia a otros y adjunta un logo si está disponible."""
-        msg = MIMEMultipart()
-        msg['From'] = mail_sender
-        msg['To'] = to_email
-        msg['Cc'] = ", ".join(cc_emails) if cc_emails else ""
-        msg['Subject'] = subject
+        """Envía un correo electrónico usando Microsoft Graph API."""
+        try:
+            access_token, graph_url = self._get_graph_token_and_url()
+        except Exception as ex:
+            print(f"Error obteniendo token de Graph: {ex}")
+            return
 
-        # Agregar el contenido HTML
-        msg.attach(MIMEText(body, 'html'))
-        
-        # Adjuntar el logo si está disponible
+        send_url = f"{graph_url}{mail_sender}/sendMail"
+
+        message = {
+            "message": {
+                "subject": subject,
+                "body": {
+                    "contentType": "HTML",
+                    "content": body
+                },
+                "toRecipients": [{"emailAddress": {"address": to_email}}],
+                "ccRecipients": [
+                    {"emailAddress": {"address": cc}} for cc in cc_emails
+                ] if cc_emails else []
+            }
+        }
+
+        # Adjuntar el logo como imagen inline si está disponible
         if logo_path:
             try:
                 with open(logo_path, 'rb') as img:
-                    logo = MIMEImage(img.read())
-                    logo.add_header('Content-ID', '<company_logo>')
-                    msg.attach(logo)
+                    logo_b64 = base64.b64encode(img.read()).decode('utf-8')
+                message["message"]["attachments"] = [{
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": "logo.png",
+                    "contentType": "image/png",
+                    "contentBytes": logo_b64,
+                    "isInline": True,
+                    "contentId": "company_logo"
+                }]
             except Exception as e:
                 print(f"Error adjuntando el logo: {e}")
-        
+
         try:
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                server.sendmail(mail_sender, [to_email] + cc_emails, msg.as_string())
-            print(f"Correo enviado a {to_email} con copia a {', '.join(cc_emails)}")
+            response = requests.post(
+                send_url,
+                json=message,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            if response.status_code == 202:
+                print(f"Correo enviado a {to_email} con copia a {', '.join(cc_emails)}")
+            else:
+                print(f"Error al enviar correo: {response.status_code} - {response.text}")
         except Exception as ex:
             print(f"Error al enviar correo a {to_email}: {ex}")
 
